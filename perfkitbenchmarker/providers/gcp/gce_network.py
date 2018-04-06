@@ -140,16 +140,18 @@ class GceNetworkSpec(network.BaseNetworkSpec):
 class GceNetworkResource(resource.BaseResource):
   """Object representing a GCE Network resource."""
 
-  def __init__(self, name, mode, project):
+  def __init__(self, name, subnet_mode, project):
     super(GceNetworkResource, self).__init__()
     self.name = name
-    self.mode = mode
+    self.subnet_mode = subnet_mode
     self.project = project
 
   def _Create(self):
     """Creates the Network resource."""
     cmd = util.GcloudCommand(self, 'compute', 'networks', 'create', self.name)
-    cmd.flags['mode'] = self.mode
+
+    ##NOTE subnet-mode flag only added in 175.0.0, wont work with gcloud sdk versions before that
+    cmd.flags['subnet-mode'] = self.subnet_mode
     cmd.Issue()
 
   def _Delete(self):
@@ -204,8 +206,8 @@ class GceNetwork(network.BaseNetwork):
     super(GceNetwork, self).__init__(network_spec)
     self.project = network_spec.project
     name = FLAGS.gce_network_name or 'pkb-network-%s' % FLAGS.run_uri
-    mode = 'auto' if FLAGS.gce_subnet_region is None else 'custom'
-    self.network_resource = GceNetworkResource(name, mode, self.project)
+    subnet_mode = 'auto' if FLAGS.gce_subnet_region is None else 'custom'
+    self.network_resource = GceNetworkResource(name, subnet_mode, self.project)
     if FLAGS.gce_subnet_region is None:
       self.subnet_resource = None
     else:
