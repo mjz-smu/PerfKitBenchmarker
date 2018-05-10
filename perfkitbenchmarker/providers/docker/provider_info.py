@@ -20,7 +20,7 @@ from perfkitbenchmarker import provider_info
 
 
 class DockerProviderInfo(provider_info.BaseProviderInfo):
-  SUPPORTED_BENCHMARKS = ['iperf', 'netperf']
+  SUPPORTED_BENCHMARKS = ['iperf', 'netperf', 'local_to_cloud']
 
   UNSUPPORTED_BENCHMARKS = ['bonnieplusplus', 'sysbench']
 
