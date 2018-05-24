@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from perfkitbenchmarker.vpn_service import VPNService
 """Container for all data required for a benchmark to run."""
 
 import datetime
@@ -130,7 +131,14 @@ class BenchmarkSpec(object):
     self.cloud_tpu = None
     self.edw_service = None
     self.cloud_redis = None
+
     self._zone_index = 0
+
+    self.vpn_service = None
+    self.vpns = {}  # dict of vpn's
+    self.vpngws = {}  # dict of vpn gw's
+    self.vpngws_lock = threading.Lock()
+    self.vpns_lock = threading.Lock()
 
     # Modules can't be pickled, but functions can, so we store the functions
     # necessary to run the benchmark.
@@ -334,7 +342,6 @@ class BenchmarkSpec(object):
     clouds = {}
     for group_name, group_spec in sorted(vm_group_specs.iteritems()):
       vms = self.ConstructVirtualMachineGroup(group_name, group_spec)
-
       if group_spec.os_type == os_types.JUJU:
         # The Juju VM needs to be created first, so that subsequent units can
         # be properly added under its control.
@@ -385,6 +392,12 @@ class BenchmarkSpec(object):
           raise Exception('Cannot have a vm group {0} with a {1} spark '
                           'service'.format(name, spark_service.PKB_MANAGED))
         self.config.vm_groups[name] = spec
+
+  def ConstructVPNService(self):
+    """Create the VPNService object."""
+    if self.config.vpn_service is None:
+      return
+    self.vpn_service = VPNService(self)
 
   def Prepare(self):
     targets = [(vm.PrepareBackgroundWorkload, (), {}) for vm in self.vms]
@@ -444,6 +457,8 @@ class BenchmarkSpec(object):
     if self.cloud_redis:
       self.config.cloud_redis.client_vm = self.vms[0]
       self.cloud_redis.Create()
+    if self.vpn_service:
+      self.vpn_service.Create()
 
   def Delete(self):
     if self.deleted:

@@ -257,6 +257,11 @@ flags.DEFINE_string(
     'helpmatch', '',
     'Shows only flags defined in a module whose name matches the given regex.',
     allow_override_cpp=True)
+flags.DEFINE_string(
+    'helpmatch_md', '',
+    'Markdown friendly output.'
+    'Shows only flags defined in a module whose name matches the given regex.',
+    allow_override_cpp=True)
 flags.DEFINE_boolean(
     'create_failed_run_samples', False,
     'If true, PKB will create a sample specifying that a run stage failed. '
@@ -471,6 +476,7 @@ def DoProvisionPhase(spec, timer):
   spec.ConstructCloudTpu()
   spec.ConstructEdwService()
   spec.ConstructCloudRedis()
+  spec.ConstructVPNService()
   # Pickle the spec before we try to create anything so we can clean
   # everything up on a second run if something goes wrong.
   spec.Pickle()
