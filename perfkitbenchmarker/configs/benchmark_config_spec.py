@@ -1196,8 +1196,8 @@ class _VPNServiceSpec(spec.BaseSpec):
   def __init__(self, component_full_name, flag_values=None, **kwargs):
     super(_VPNServiceSpec, self).__init__(
         component_full_name, flag_values=flag_values, **kwargs)
-    if not self.vpn_svc_name:
-      self.vpn_svc_name = 'pkb-vpn-svc-{0}'.format(flag_values.run_uri)
+    if not self.name:
+      self.name = 'pkb-vpn-svc-{0}'.format(flag_values.run_uri)
 
   @classmethod
   def _GetOptionDecoderConstructions(cls):
@@ -1213,8 +1213,11 @@ class _VPNServiceSpec(spec.BaseSpec):
         'shared_key': (option_decoders.StringDecoder, {
             'default': None,
             'none_ok': True}),
-        'vpn_svc_name': (option_decoders.StringDecoder, {
+        'name': (option_decoders.StringDecoder, {
             'default': None,
+            'none_ok': True}),
+        'tunnel_count': (option_decoders.IntDecoder, {
+            'default': 1,
             'none_ok': True}),
     })
     return result
@@ -1230,9 +1233,12 @@ class _VPNServiceSpec(spec.BaseSpec):
           provided config values.
     """
     super(_VPNServiceSpec, cls)._ApplyFlags(config_values, flag_values)
-    if flag_values['use_vpn'].present:
-      config_values['use_vpn'] = flag_values.use_vpn
-
+    if flag_values['vpn_service_tunnel_count'].present:
+      config_values['tunnel_count'] = flag_values.tunnel_count
+    if flag_values['vpn_service_name'].present:
+      config_values['name'] = flag_values.name
+    if flag_values['vpn_service_shared_key'].present:
+      config_values['shared_key'] = flag_values.shared_key
 
 
 class _VPNServiceDecoder(option_decoders.TypeVerifier):
@@ -1243,7 +1249,7 @@ class _VPNServiceDecoder(option_decoders.TypeVerifier):
     super(_VPNServiceDecoder, self).__init__(valid_types=(dict,), **kwargs)
 
   def Decode(self, value, component_full_name, flag_values):
-    """Verify cloud_redis dict of a benchmark config object.
+    """Verify vpn_service dict of a benchmark config object.
 
     Args:
       value: dict. Config dictionary
