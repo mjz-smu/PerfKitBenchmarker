@@ -110,7 +110,7 @@ class GceVPNGW(network.BaseVPNGW):
     #  delete the address on our gw
     cmd = util.GcloudCommand(self, 'compute', 'addresses', 'delete', self.name)
     cmd.flags['region'] = self.region
-    self.ip_addr_name = cmd.Issue()
+    cmd.Issue()
 
   def SetupForwarding(self):
     """Create IPSec forwarding rules between the source gw and the target gw.
@@ -183,7 +183,7 @@ class GceVPNGW(network.BaseVPNGW):
     cmd.flags['network'] = self.network_name
     cmd.flags['next-hop-vpn-tunnel'] = 'tunnel' + self.name
     cmd.flags['next-hop-vpn-tunnel-region'] = self.region
-    self.tunnels['route' + self.name] = cmd.Issue()
+    self.routes['route' + self.name] = cmd.Issue()
 
   def DeleteRoute(self, route):
     """Delete route
@@ -510,7 +510,7 @@ class GceNetwork(network.BaseNetwork):
       if self.subnet_resource:
         self.subnet_resource.Create()
       self.default_firewall_rule.Create()
-      if self.vpngw:
+      if getattr(self, 'vpngw', False):
         self.vpngw.Create()
 
   def Delete(self):
@@ -519,6 +519,6 @@ class GceNetwork(network.BaseNetwork):
       self.default_firewall_rule.Delete()
       if self.subnet_resource:
         self.subnet_resource.Delete()
-      if self.vpngw:
+      if getattr(self, 'vpngw', False):
         self.vpngw.Delete()
       self.network_resource.Delete()
