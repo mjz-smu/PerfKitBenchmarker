@@ -41,6 +41,9 @@ flags.DEFINE_integer('iperf_timeout', None,
                      'killing iperf client command.',
                      lower_bound=1)
 
+flags.DEFINE_string('iperf_tcp_window', None,
+                    'TCP WINDOW SIZE')
+
 FLAGS = flags.FLAGS
 
 BENCHMARK_NAME = 'iperf'
@@ -101,6 +104,13 @@ def _RunIperf(sending_vm, receiving_vm, receiving_ip_address, ip_type):
                (receiving_ip_address, IPERF_PORT,
                 FLAGS.iperf_runtime_in_seconds,
                 FLAGS.iperf_sending_thread_count))
+
+  if FLAGS.iperf_tcp_window:
+    iperf_cmd = ('iperf --client %s --port %s --format m --time %s -P %s -w %s' %
+               (receiving_ip_address, IPERF_PORT,
+                FLAGS.iperf_runtime_in_seconds,
+                FLAGS.iperf_sending_thread_count,
+                FLAGS.iperf_tcp_window))
   # the additional time on top of the iperf runtime is to account for the
   # time it takes for the iperf process to start and exit
   timeout_buffer = FLAGS.iperf_timeout or 30 + FLAGS.iperf_sending_thread_count
@@ -124,6 +134,30 @@ def _RunIperf(sending_vm, receiving_vm, receiving_ip_address, ip_type):
   # [  3]  0.0-60.0 sec  3738 MBytes   522 Mbits/sec
   # [SUM]  0.0-60.0 sec  14010 MBytes  1957 Mbits/sec
 
+  stdout2 = stdout
+  match = re.search('TCP window size: (.*) MByte ', stdout)
+  if match:
+    actual_window_size = match.group(1)
+    actual_window_size = float(actual_window_size)
+  else:
+    match = re.search('TCP window size: .* MByte ', stdout)
+    if match:
+      actual_window_size = match.group(1)
+      actual_window_size = float(actual_window_size)
+    else:
+      actual_window_size = 0
+
+  if FLAGS.iperf_tcp_window:
+    match = re.search('WARNING: requested (.*) MByte\)', stdout)
+    if match:
+      requested_window_size = match.group(1)
+      requested_window_size = float(requested_window_size)
+    else:
+      requested_window_size = actual_window_size
+  else:
+    requested_window_size = 0
+  
+
   thread_values = re.findall(r'\[SUM].*\s+(\d+\.?\d*).Mbits/sec', stdout)
   if not thread_values:
     # If there is no sum you have try and figure out an estimate
@@ -135,11 +169,9 @@ def _RunIperf(sending_vm, receiving_vm, receiving_ip_address, ip_type):
       raise ValueError('Only %s out of %s iperf threads reported a'
                        ' throughput value.' %
                        (len(thread_values), FLAGS.iperf_sending_thread_count))
-
   total_throughput = 0.0
   for value in thread_values:
     total_throughput += float(value)
-
   metadata = {
       # The meta data defining the environment
       'receiving_machine_type': receiving_vm.machine_type,
@@ -148,26 +180,22 @@ def _RunIperf(sending_vm, receiving_vm, receiving_ip_address, ip_type):
       'sending_thread_count': FLAGS.iperf_sending_thread_count,
       'sending_zone': sending_vm.zone,
       'runtime_in_seconds': FLAGS.iperf_runtime_in_seconds,
-      'ip_type': ip_type
+      'ip_type': ip_type,
+      'tcp_window_size_requested_mb': requested_window_size,
+      'tcp_window_size_actual_mb': actual_window_size
   }
   return sample.Sample('Throughput', total_throughput, 'Mbits/sec', metadata)
-
-
 def Run(benchmark_spec):
   """Run iperf on the target vm.
-
   Args:
     benchmark_spec: The benchmark specification. Contains all data that is
         required to run the benchmark.
-
   Returns:
     A list of sample.Sample objects.
   """
   vms = benchmark_spec.vms
   results = []
-
   logging.info('Iperf Results:')
-
   # Send traffic in both directions
   for sending_vm, receiving_vm in vms, reversed(vms):
     # Send using external IP addresses
@@ -176,7 +204,6 @@ def Run(benchmark_spec):
                                receiving_vm,
                                receiving_vm.ip_address,
                                'external'))
-
     # Send using internal IP addresses
     if vm_util.ShouldRunOnInternalIpAddress(sending_vm,
                                             receiving_vm):
@@ -184,13 +211,9 @@ def Run(benchmark_spec):
                                receiving_vm,
                                receiving_vm.internal_ip,
                                'internal'))
-
   return results
-
-
 def Cleanup(benchmark_spec):
   """Cleanup iperf on the target vm (by uninstalling).
-
   Args:
     benchmark_spec: The benchmark specification. Contains all data that is
         required to run the benchmark.

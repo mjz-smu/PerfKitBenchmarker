@@ -109,6 +109,10 @@ flags.DEFINE_bool('network_enable_BBR', False,
                   '"net.ipv4.tcp_congestion_control=bbr" '
                   'As with other sysctrls, will cause a reboot to happen.')
 
+flags.DEFINE_bool('increase_tcp_window', False,
+                  'A flag to increase the TCP window for all VMs on the network. '
+                  'As with other sysctrls, will cause a reboot to happen.')
+
 flags.DEFINE_integer('num_disable_cpus', None,
                      'Number of CPUs to disable on the virtual machine.'
                      'If the VM has n CPUs, you can disable at most n-1.',
@@ -294,6 +298,7 @@ class BaseLinuxMixin(virtual_machine.BaseOsMixin):
     self.SetFiles()
     self.DoSysctls()
     self.DoConfigureNetworkForBBR()
+    self.DoConfigureTCPWindow()
     self._RebootIfNecessary()
     self._DisableCpus()
     self.RecordAdditionalMetadata()
@@ -387,6 +392,16 @@ class BaseLinuxMixin(virtual_machine.BaseOsMixin):
 
     self.ApplySysctlPersistent('net.core.default_qdisc', 'fq')
     self.ApplySysctlPersistent('net.ipv4.tcp_congestion_control', 'bbr')
+
+  def DoConfigureTCPWindow(self):
+    """Apply --network_enable_BBR to the VM."""
+    if not FLAGS.increase_tcp_window:
+      return
+
+    self.ApplySysctlPersistent('net.core.rmem_max', '12582912')
+    self.ApplySysctlPersistent('net.core.wmem_max', '4194304')
+    self.ApplySysctlPersistent('net.ipv4.tcp_rmem', '4096 87380 4194304')
+    self.ApplySysctlPersistent('net.ipv4.tcp_wmem','4096 87380 4194304')
 
   def _RebootIfNecessary(self):
     """Will reboot the VM if self._needs_reboot has been set."""
