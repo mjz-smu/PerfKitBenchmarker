@@ -35,6 +35,7 @@ import threading
 import time
 import uuid
 
+from perfkitbenchmarker import context
 from perfkitbenchmarker import disk
 from perfkitbenchmarker import errors
 from perfkitbenchmarker import flags
@@ -112,6 +113,8 @@ flags.DEFINE_integer('num_disable_cpus', None,
                      'Number of CPUs to disable on the virtual machine.'
                      'If the VM has n CPUs, you can disable at most n-1.',
                      lower_bound=1)
+flags.DEFINE_integer('disk_fill_size', 0,
+                     'Size of file to create in GBs.')
 
 
 class BaseLinuxMixin(virtual_machine.BaseOsMixin):
@@ -272,6 +275,7 @@ class BaseLinuxMixin(virtual_machine.BaseOsMixin):
     self._DisableCpus()
     self.RecordAdditionalMetadata()
     self.BurnCpu()
+    self.FillDisk()
 
   def SetFiles(self):
     """Apply --set_files to the VM."""
@@ -310,6 +314,14 @@ class BaseLinuxMixin(virtual_machine.BaseOsMixin):
       self.RemoteCommand('sudo bash -c '
                          '"echo 0 > /sys/devices/system/cpu/cpu%s/online"' %
                          x)
+
+  def FillDisk(self):
+    """Fills the primary scratch disk with a zeros file."""
+    if FLAGS.disk_fill_size:
+      out_file = posixpath.join(self.scratch_disks[0].mount_point, 'fill_file')
+      self.RobustRemoteCommand(
+          'dd if=/dev/zero of={out_file} bs=1G count={fill_size}'.format(
+              out_file=out_file, fill_size=FLAGS.disk_fill_size))
 
   def ApplySysctlPersistent(self, key, value):
     """Apply "key=value" pair to /etc/sysctl.conf and reboot.
@@ -455,34 +467,42 @@ class BaseLinuxMixin(virtual_machine.BaseOsMixin):
     pass
 
   @vm_util.Retry()
-  def FormatDisk(self, device_path):
+  def FormatDisk(self, device_path, disk_type=None):
     """Formats a disk attached to the VM."""
     # Some images may automount one local disk, but we don't
     # want to fail if this wasn't the case.
+    if disk.NFS == disk_type:
+      return
     fmt_cmd = ('[[ -d /mnt ]] && sudo umount /mnt; '
                'sudo mke2fs -F -E lazy_itable_init=0,discard -O '
                '^has_journal -t ext4 -b 4096 %s' % device_path)
     self.RemoteHostCommand(fmt_cmd)
 
-  def MountDisk(self, device_path, mount_path):
+  def MountDisk(self, device_path, mount_path, disk_type=None,
+                mount_options=disk.DEFAULT_MOUNT_OPTIONS,
+                fstab_options=disk.DEFAULT_FSTAB_OPTIONS):
     """Mounts a formatted disk in the VM."""
-    mount_opts = _DEFAULT_DISK_MOUNT_OPTIONS
-    fs_type = _DEFAULT_DISK_FS_TYPE
-    fstab_opts = _DEFAULT_DISK_FSTAB_OPTIONS
+    mount_options = '-o %s' % mount_options if mount_options else ''
+    if disk.NFS == disk_type:
+      mount_options = '-t nfs %s' % mount_options
+      fs_type = 'nfs'
+    else:
+      fs_type = _DEFAULT_DISK_FS_TYPE
+    fstab_options = fstab_options or ''
     mnt_cmd = ('sudo mkdir -p {mount_path};'
-               'sudo mount {mount_cmd_opts} {device_path} {mount_path};'
+               'sudo mount {mount_options} {device_path} {mount_path} && '
                'sudo chown -R $USER:$USER {mount_path};').format(
                    mount_path=mount_path,
                    device_path=device_path,
-                   mount_cmd_opts='-o %s' % mount_opts)
+                   mount_options=mount_options)
     self.RemoteHostCommand(mnt_cmd)
     # add to /etc/fstab to mount on reboot
-    mnt_cmd = ('echo "{device_path} {mount_path} {fs_type} {fstab_opts}" '
+    mnt_cmd = ('echo "{device_path} {mount_path} {fs_type} {fstab_options}" '
                '| sudo tee -a /etc/fstab').format(
                    device_path=device_path,
                    mount_path=mount_path,
                    fs_type=fs_type,
-                   fstab_opts=fstab_opts)
+                   fstab_options=fstab_options)
     self.RemoteHostCommand(mnt_cmd)
 
   def RemoteCopy(self, file_path, remote_path='', copy_to=True):
@@ -831,8 +851,10 @@ class BaseLinuxMixin(virtual_machine.BaseOsMixin):
       self.StripeDisks(device_paths, data_disk.GetDevicePath())
 
     if disk_spec.mount_point:
-      self.FormatDisk(data_disk.GetDevicePath())
-      self.MountDisk(data_disk.GetDevicePath(), disk_spec.mount_point)
+      self.FormatDisk(data_disk.GetDevicePath(), disk_spec.disk_type)
+      self.MountDisk(data_disk.GetDevicePath(), disk_spec.mount_point,
+                     disk_spec.disk_type, data_disk.mount_options,
+                     data_disk.fstab_options)
 
   def StripeDisks(self, devices, striped_device):
     """Raids disks together using mdadm.
@@ -890,11 +912,29 @@ class BaseLinuxMixin(virtual_machine.BaseOsMixin):
     md5sum, _ = stdout.split()
     return md5sum
 
+  def _GetNfsService(self):
+    """Returns the NfsService created in the benchmark spec.
+
+    Before calling this method check that the disk.disk_type is equal to
+    disk.NFS or else an exception will be raised.
+
+    Returns:
+      The nfs_service.BaseNfsService service for this cloud.
+
+    Raises:
+      CreationError: If no NFS service was created.
+    """
+    nfs = getattr(context.GetThreadBenchmarkSpec(), 'nfs_service')
+    if nfs is None:
+      raise errors.Resource.CreationError('No NFS Service created')
+    return nfs
+
 
 class RhelMixin(BaseLinuxMixin):
   """Class holding RHEL specific VM methods and attributes."""
 
   OS_TYPE = os_types.RHEL
+  BASE_OS_TYPE = os_types.RHEL
 
   def OnStartup(self):
     """Eliminates the need to have a tty to run sudo commands."""
@@ -1017,6 +1057,7 @@ class DebianMixin(BaseLinuxMixin):
   """Class holding Debian specific VM methods and attributes."""
 
   OS_TYPE = os_types.DEBIAN
+  BASE_OS_TYPE = os_types.DEBIAN
 
   def __init__(self, *args, **kwargs):
     super(DebianMixin, self).__init__(*args, **kwargs)

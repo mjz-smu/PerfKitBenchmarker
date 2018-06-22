@@ -100,7 +100,7 @@ class AwsDpbEmr(dpb_service.BaseDpbService):
   def __init__(self, dpb_service_spec):
     super(AwsDpbEmr, self).__init__(dpb_service_spec)
     self.project = None
-    self.cmd_prefix = util.AWS_PREFIX
+    self.cmd_prefix = list(util.AWS_PREFIX)
 
     if FLAGS.zones:
       self.zone = FLAGS.zones[0]
@@ -173,7 +173,8 @@ class AwsDpbEmr(dpb_service.BaseDpbService):
                              json.dumps(instance_groups),
                              '--application', 'Name=Spark',
                              'Name=Hadoop',
-                             '--log-uri', logs_bucket]
+                             '--log-uri', logs_bucket,
+                             '--tags'] + util.MakeFormattedDefaultTags()
     if self.network:
       cmd += ['--ec2-attributes', 'SubnetId=' + self.network.subnet.id]
 
