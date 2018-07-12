@@ -30,6 +30,7 @@ from perfkitbenchmarker import providers
 
 FLAGS = flags.FLAGS
 NETWORK_RANGE = '10.0.0.0/8'
+NETWORK_RANGE2 = '192.168.0.0/16'
 ALLOW_ALL = 'tcp:1-65535,udp:1-65535,icmp'
 
 
@@ -507,6 +508,8 @@ class GceNetwork(network.BaseNetwork):
       self.NETWORK_RANGE = network_spec.cidr
     self.default_firewall_rule = GceFirewallRule(
         firewall_name, self.project, ALLOW_ALL, name, NETWORK_RANGE)
+    self.default_firewall_rule2 = GceFirewallRule(
+        firewall_name, self.project, ALLOW_ALL, name, NETWORK_RANGE2)
     # add VPNGW to the network
     if network_spec.zone and network_spec.cidr and FLAGS.use_vpn:
       vpngw_name = 'vpngw-%s-%s' % (
@@ -534,6 +537,7 @@ class GceNetwork(network.BaseNetwork):
       if self.subnet_resource:
         self.subnet_resource.Create()
       self.default_firewall_rule.Create()
+      self.default_firewall_rule2.Create()
       if getattr(self, 'vpngw', False):
         self.vpngw.Create()
 
@@ -541,6 +545,7 @@ class GceNetwork(network.BaseNetwork):
     """Deletes the actual network."""
     if FLAGS.gce_network_name is None:
       self.default_firewall_rule.Delete()
+      self.default_firewall_rule2.Delete()
       if self.subnet_resource:
         self.subnet_resource.Delete()
       if getattr(self, 'vpngw', False):
