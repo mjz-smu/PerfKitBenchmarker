@@ -30,7 +30,7 @@ import re
 #                      'If set to True, the ping command will also be executed '
 #                      'using the external ips of the vms.')
 
-flags.DEFINE_integer('desired_throughput_mb', 1000,
+flags.DEFINE_integer('desired_throughput_mbit', 1000,
                      'The desired throughput to test for '
                      'in Mbits/sec',
                      lower_bound=1)
@@ -115,10 +115,21 @@ def Run(benchmark_spec):
 
   logging.info(type(ping_results))
   logging.info(ping_results)
+  logging.info(ping_results[1])
+  logging.info(ping_results[5])
+  logging.info(ping_results[1].value)
 
-  # pipe_size = FLAGS.desired_throughput_mb
+  average_latency = float(ping_results[1].value * 0.001)
 
-  # window size = pipe_size * (average_latency * 0.01)
+  pipe_size = float(FLAGS.desired_throughput_mbit)
+
+  logging.info("avg Latency in seconds: %s", str(average_latency))
+  logging.info("pipe_size in mbits: %s", str(pipe_size))
+
+  #window_size(Mbytes) = pipe_size(Mbits/sec) * average_latency(sec)
+  window_size = pipe_size * (average_latency) * 0.125
+
+  logging.info(window_size)
 
   results=[]
   logging.info('Iperf Results:')
@@ -129,19 +140,21 @@ def Run(benchmark_spec):
       results.append(_RunIperf(sending_vm,
                                receiving_vm,
                                receiving_vm.ip_address,
-                               'external'))
+                               'external',
+                               window_size))
     # Send using internal IP addresses
     if vm_util.ShouldRunOnInternalIpAddress(sending_vm,
                                             receiving_vm):
       results.append(_RunIperf(sending_vm,
                                receiving_vm,
                                receiving_vm.internal_ip,
-                               'internal'))
+                               'internal',
+                               window_size))
 
   return results
 
 @vm_util.Retry(max_retries=IPERF_RETRIES)
-def _RunIperf(sending_vm, receiving_vm, receiving_ip_address, ip_type):
+def _RunIperf(sending_vm, receiving_vm, receiving_ip_address, ip_type, window_size):
   """Run iperf using sending 'vm' to connect to 'ip_address'.
 
   Args:
@@ -152,17 +165,24 @@ def _RunIperf(sending_vm, receiving_vm, receiving_ip_address, ip_type):
   Returns:
     A Sample.
   """
+  use_larger_tcp_window = False
+
+  if window_size > 0.08:
+    use_larger_tcp_window = True
+
+  formatted_window_size = str(window_size) + "MB"
+
   iperf_cmd = ('iperf --client %s --port %s --format m --time %s -P %s' %
                (receiving_ip_address, IPERF_PORT,
                 FLAGS.iperf_runtime_in_seconds,
                 FLAGS.iperf_sending_thread_count))
 
-  if FLAGS.iperf_tcp_window:
+  if use_larger_tcp_window == True:
     iperf_cmd = ('iperf --client %s --port %s --format m --time %s -P %s -w %s' %
                (receiving_ip_address, IPERF_PORT,
                 FLAGS.iperf_runtime_in_seconds,
                 FLAGS.iperf_sending_thread_count,
-                FLAGS.iperf_tcp_window))
+                formatted_window_size))
   # the additional time on top of the iperf runtime is to account for the
   # time it takes for the iperf process to start and exit
   timeout_buffer = FLAGS.iperf_timeout or 30 + FLAGS.iperf_sending_thread_count
