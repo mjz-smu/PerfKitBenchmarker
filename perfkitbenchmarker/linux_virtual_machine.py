@@ -400,11 +400,12 @@ class BaseLinuxMixin(virtual_machine.BaseOsMixin):
 
     #values are in bytes
 
-    #sets max tcp_window to 12MB
-    self.ApplySysctlPersistent('net.core.rmem_max', '12582912')
-    self.ApplySysctlPersistent('net.core.wmem_max', '12582912')
-    self.ApplySysctlPersistent('net.ipv4.tcp_rmem', '4096 87380 12582912')
-    self.ApplySysctlPersistent('net.ipv4.tcp_wmem', '4096 87380 12582912')
+    #sets max tcp buffer to 64MB
+    #
+    self.ApplySysctlPersistent('net.core.rmem_max', '67108864')
+    self.ApplySysctlPersistent('net.core.wmem_max', '67108864')
+    self.ApplySysctlPersistent('net.ipv4.tcp_rmem', '4096 87380 33554432')
+    self.ApplySysctlPersistent('net.ipv4.tcp_wmem', '4096 87380 33554432')
 
   def _RebootIfNecessary(self):
     """Will reboot the VM if self._needs_reboot has been set."""
