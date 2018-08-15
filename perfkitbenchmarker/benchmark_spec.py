@@ -14,6 +14,9 @@
 from perfkitbenchmarker.vpn_service import VPNService
 """Container for all data required for a benchmark to run."""
 
+# import dill
+# import objgraph
+
 import contextlib
 import copy
 import copy_reg
@@ -106,6 +109,8 @@ class BenchmarkSpec(object):
       benchmark_uid: An identifier unique to this run of the benchmark even
           if the same benchmark is run multiple times with different configs.
     """
+
+#     self.callcount = 0
     self.config = benchmark_config
     self.name = benchmark_module.BENCHMARK_NAME
     self.uid = benchmark_uid
@@ -668,6 +673,19 @@ class BenchmarkSpec(object):
 
   def Pickle(self):
     """Pickles the spec so that it can be unpickled on a subsequent run."""
+    # dill.loads(dill.dumps(self))
+#     logging.info("Attempting to Pickle something!")
+#     objgraph.show_refs(self, max_depth=3, too_many=100, filename='your_bad_object' + str(self.callcount) + '.png')
+#     self.callcount += 1
+#     logging.info('BadItems: ')
+#     logging.info( dill.detect.baditems(self))
+#     logging.info('BadTypes: ')
+#     logging.info( dill.detect.badtypes(self))
+#     logging.info('Errors: ')
+#     logging.info(dill.detect.errors(self))
+#     logging.info('BadObjects: ')
+#     logging.info(dill.detect.badobjects(self))
+
     with open(self._GetPickleFilename(self.uid), 'wb') as pickle_file:
       pickle.dump(self, pickle_file, 2)
 
