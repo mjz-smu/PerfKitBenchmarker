@@ -35,6 +35,12 @@ flags.DEFINE_integer('desired_throughput_mbit', 1000,
                      'in Mbits/sec',
                      lower_bound=1)
 
+flags.DEFINE_integer('desired_throughput_max_iterations', 3,
+                     'The maximum number of iterations '
+                     'used of different window sizes to '
+                     'try and achieve the desired throughput',
+                     lower_bound = 1, upper_bound = 10)
+
 FLAGS = flags.FLAGS
 
 
@@ -220,7 +226,7 @@ def _RunIperf(sending_vm, receiving_vm, receiving_ip_address, ip_type, window_si
       actual_window_size = 0
 
   if FLAGS.iperf_tcp_window:
-    match = re.search('WARNING: requested (.*) MByte\)', stdout)
+    match = re.search('WARNING: requested (.*) MByte', stdout)
     if match:
       requested_window_size = match.group(1)
       requested_window_size = float(requested_window_size)
@@ -244,6 +250,10 @@ def _RunIperf(sending_vm, receiving_vm, receiving_ip_address, ip_type, window_si
   total_throughput = 0.0
   for value in thread_values:
     total_throughput += float(value)
+
+
+  #TODO add logic to run tests again if didn't meet desired throughput
+
   metadata = {
       # The meta data defining the environment
       'receiving_machine_type': receiving_vm.machine_type,

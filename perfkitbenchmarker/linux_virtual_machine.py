@@ -377,11 +377,16 @@ class BaseLinuxMixin(virtual_machine.BaseOsMixin):
 
     #values are in bytes
 
-    #sets max tcp buffer to 64MB
-    #
+    #sets max OS receive buffer for all connections
     self.ApplySysctlPersistent('net.core.rmem_max', '67108864')
+    #sets max OS send buffer for all connections
     self.ApplySysctlPersistent('net.core.wmem_max', '67108864')
+    #TCP autotuning setting. first value = min receive buffer
+    #second value = default receive buffer.
+    #overrides the /proc/sys/net/core/rmem_default value
+    #third value is the max receive buffer
     self.ApplySysctlPersistent('net.ipv4.tcp_rmem', '4096 87380 33554432')
+    #TCP autotuning setting. Same as above, but with send instead of receive
     self.ApplySysctlPersistent('net.ipv4.tcp_wmem', '4096 87380 33554432')
 
   def _RebootIfNecessary(self):
