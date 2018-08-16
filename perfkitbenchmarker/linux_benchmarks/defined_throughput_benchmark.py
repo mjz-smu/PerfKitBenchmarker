@@ -41,6 +41,11 @@ flags.DEFINE_integer('desired_throughput_max_iterations', 3,
                      'try and achieve the desired throughput',
                      lower_bound = 1, upper_bound = 10)
 
+#TODO change these flags to be specific to this benchmark
+#also uses flags
+#FLAGS.iperf_sending_thread_count
+#FLAGS.iperf_runtime_in_seconds
+
 FLAGS = flags.FLAGS
 
 
@@ -74,10 +79,10 @@ def Prepare(benchmark_spec):  # pylint: disable=unused-argument
     raise ValueError(
         'Ping benchmark requires exactly two machines, found {0}'
         .format(len(benchmark_spec.vms)))
-  if FLAGS.ping_also_run_using_external_ip:
-    vms = benchmark_spec.vms
-    for vm in vms:
-      vm.AllowIcmp()
+  
+  # vms = benchmark_spec.vms
+  # for vm in vms:
+  #   vm.AllowIcmp()
 
   vms = benchmark_spec.vms
   if len(vms) != 2:
@@ -86,6 +91,7 @@ def Prepare(benchmark_spec):  # pylint: disable=unused-argument
             vms)))
 
   for vm in vms:
+    vm.AllowIcmp()
     vm.Install('iperf')
     if vm_util.ShouldRunOnExternalIpAddress():
       vm.AllowPort(IPERF_PORT)
@@ -107,25 +113,28 @@ def Run(benchmark_spec):
   """
   vms = benchmark_spec.vms
   ping_results = []
+  ping_results_external = []
   for sending_vm, receiving_vm in vms, reversed(vms):
     ping_results = ping_results + _RunPing(sending_vm,
                                  receiving_vm,
                                  receiving_vm.internal_ip,
                                  'internal')
-  if FLAGS.ping_also_run_using_external_ip:
-    for sending_vm, receiving_vm in vms, reversed(vms):
-      ping_results = ping_results + _RunPing(sending_vm,
-                                   receiving_vm,
-                                   receiving_vm.ip_address,
-                                   'external')
+  #if FLAGS.ping_also_run_using_external_ip:
+  for sending_vm, receiving_vm in vms, reversed(vms):
+    ping_results_external = ping_results_external + _RunPing(sending_vm,
+                                 receiving_vm,
+                                 receiving_vm.ip_address,
+                                 'external')
 
-  logging.info(type(ping_results))
-  logging.info(ping_results)
-  logging.info(ping_results[1])
-  logging.info(ping_results[5])
-  logging.info(ping_results[1].value)
+  # logging.info(type(ping_results))
+  # logging.info(ping_results)
+  # logging.info(ping_results[1])
+  # logging.info(ping_results[5])
+  # logging.info(ping_results[1].value)
 
   average_latency = float(ping_results[1].value * 0.001)
+
+  average_latency_external = float(ping_results_external[1].value * 0.001)
 
   pipe_size = float(FLAGS.desired_throughput_mbit)
 
@@ -135,7 +144,10 @@ def Run(benchmark_spec):
   #window_size(Mbytes) = pipe_size(Mbits/sec) * average_latency(sec)
   window_size = pipe_size * (average_latency) * 0.125
 
+  window_size_external = pipe_size * (average_latency_external) * 0.125
+
   logging.info(window_size)
+  logging.info(window_size_external)
 
   results=[]
   logging.info('Iperf Results:')
@@ -147,7 +159,7 @@ def Run(benchmark_spec):
                                receiving_vm,
                                receiving_vm.ip_address,
                                'external',
-                               window_size))
+                               window_size_external))
     # Send using internal IP addresses
     if vm_util.ShouldRunOnInternalIpAddress(sending_vm,
                                             receiving_vm):
