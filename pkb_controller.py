@@ -101,7 +101,7 @@ def build_command(args, benchmark, zone1, zone2):
     cmd.append('--benchmarks=iperf')
     cmd.append('--iperf_runtime_in_seconds=' +
                str(args.iperf_runtime_in_seconds))
-    cmd.append('--iperf_sending_thread_count' +
+    cmd.append('--iperf_sending_thread_count=' +
                str(args.iperf_sending_thread_count))
 
   elif benchmark == 'iperf_vpn':
