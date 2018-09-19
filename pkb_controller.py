@@ -200,7 +200,7 @@ def us_zones():
 
 def add_args(parser):
 
-  parser.add_argument('--pkb_path', default="pkb.py",
+  parser.add_argument('--pkb_path', default="./pkb.py",
                       type=str, help="file path of ./pkb.py")
 
   parser.add_argument('--all_zone_intraregion', type=str2bool, nargs='?',
