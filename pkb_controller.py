@@ -1,6 +1,10 @@
 #!/usr/bin/env python
 
 #testing script
+#TODO add support for benchmarks that use more or less than 2 zones
+#TODO add support for arbitrary pkb cmd line args
+#TODO add support for other clouds
+#TODO 
 
 import os
 import argparse
