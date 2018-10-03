@@ -546,7 +546,7 @@ class GceNetwork(network.BaseNetwork):
 
   def Create(self):
     """Creates the actual network."""
-    if FLAGS.gce_network_name is None:
+    if not FLAGS.gce_network_name:
       self.network_resource.Create()
       if self.subnet_resource:
         self.subnet_resource.Create()
@@ -558,7 +558,7 @@ class GceNetwork(network.BaseNetwork):
 
   def Delete(self):
     """Deletes the actual network."""
-    if FLAGS.gce_network_name is None:
+    if not FLAGS.gce_network_name:
       self.default_firewall_rule.Delete()
       self.default_firewall_rule2.Delete()
       if self.subnet_resource:
