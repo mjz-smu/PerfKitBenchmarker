@@ -44,6 +44,15 @@ def main():
               run_benchmark(cmd)
         count = count + 1
 
+  elif args.all_regions is True:
+    zone_list = get_one_zone_per_region()
+    for zone1 in zone_list:
+      for zone2 in zone_list:
+        if zone1 != zone2:
+          print(zone1 + " " + zone2)
+          for benchmark in benchmarks:
+            cmd = build_command(args, benchmark, zone1, zone2)
+            run_benchmark(cmd)
   else:
     for zone1 in zone_list:
       for zone2 in zone_list:
@@ -153,8 +162,23 @@ def build_command(args, benchmark, zone1, zone2):
 
 
 def get_one_zone_per_region():
+  """[summary]
+  
+  [description]
+  
+  Returns:
+    [description]
+    [type]
+  """
   all_zones = get_zones()
   zone_list = []
+  regions = {}
+  for zone in all_zones:
+    if zone[1] not in regions:
+      regions[zone[1]] = zone[2]
+      zone_list.append(zone[0])
+
+  return zone_list
 
 
 def get_zones_per_region():
@@ -211,6 +235,12 @@ def add_args(parser):
                       const=True, default=False, 
                       help='If set, runs tests between all zones in each region.'
                       'This flag overrides --zone_list')
+
+  parser.add_argument('--all_regions', type=str2bool, nargs='?',
+                      const=True, default=False, 
+                      help='If set, runs tests between 1 zones in each region.'
+                      'This flag overrides --zone_list')
+
   parser.add_argument('--zone_list',
                       type=str, help="comma delimited list of zones to test. ")
   parser.add_argument('--benchmarks', default='iperf',
