@@ -331,6 +331,249 @@ class AzureSubnet(resource.BaseResource):
   def _Delete(self):
     pass
 
+class AzureGatewaySubnet(resource.AzureSubnet):
+  """Object representing an Azure Subnet."""
+
+  def __init__(self, vnet, name):
+    super(AzureSubnet, self).__init__()
+    self.resource_group = GetResourceGroup()
+    self.vnet = vnet
+    self.name = name
+    self.args = ['--subnet', self.name]
+
+  def _Create(self):
+    vm_util.IssueCommand(
+        [azure.AZURE_PATH, 'network', 'vnet', 'subnet', 'create',
+         '--vnet-name', self.vnet.name,
+         '--address-prefix', self.vnet.address_space,
+         '--name', self.name] + self.resource_group.args)
+
+  @vm_util.Retry()
+  def _Exists(self):
+    stdout, _, _ = vm_util.IssueCommand(
+        [azure.AZURE_PATH, 'network', 'vnet', 'subnet', 'show',
+         '--vnet-name', self.vnet.name,
+         '--output', 'json',
+         '--name', self.name] + self.resource_group.args)
+
+    return bool(json.loads(stdout))
+
+  def _Delete(self):
+    pass
+
+
+class AzureVirtualNetworkGatewayResource(resource.BaseResource):
+
+  def __init__(self, name, network_name, region, cidr, project):
+    super(GceVPNGWResource, self).__init__()
+    self.name = name
+    self.network_name = network_name
+    self.region = region
+    self.cidr = cidr
+    self.project = project
+
+  def _Create(self):
+    cmd = util.GcloudCommand(self, 'compute', 'target-vpn-gateways', 'create',
+                             self.name)
+    cmd.flags['network'] = self.network_name
+    cmd.flags['region'] = self.region
+    cmd.Issue()
+
+  def _Exists(self):
+    cmd = util.GcloudCommand(self, 'compute', 'target-vpn-gateways', 'describe',
+                             self.name)
+    cmd.flags['region'] = self.region
+    _, _, retcode = cmd.Issue(suppress_warning=True)
+    return not retcode
+
+  def _Delete(self):
+    cmd = util.GcloudCommand(self, 'compute', 'target-vpn-gateways', 'delete',
+                             self.name)
+    cmd.flags['region'] = self.region
+    cmd.Issue()
+
+#az network vnet-gateway create --resource-group=perfkit --name=gateway1
+#  --public-ip-addresses=ipaddress1 --vnet=vnet1 --location=eastus
+#  --gateway-type=Vpn --sku=VpnGw1 --vpn-type=RouteBased
+class AzureVirtualNetworkGateway(resource.BaseVPNGW):
+  def __init__(self, location, name, ipaddress, vnet):
+    super(AzureVirtualNetwork, self).__init__()
+    self.name = name
+    self.resource_group = GetResourceGroup()
+    self.location = location
+    self.ipaddress = ipaddress
+    self.vnet = vnet
+    self.gateway_type = 'Vpn'
+    self.sku = 'VpnGw1'
+    self.vpn_type='RouteBased'
+
+    # Allocate a different /16 in each region. This allows for 255
+    # regions (should be enough for anyone), and 65536 VMs in each
+    # region. Using different address spaces prevents us from
+    # accidentally contacting the wrong VM.
+    self.address_space = '10.%s.0.0/16' % self.vnet_num
+
+  def _Create(self):
+    """Creates the virtual network."""
+    vm_util.IssueCommand(
+        [azure.AZURE_PATH, 'network', 'vnet-gateway', 'create',
+         '--location', self.location,
+         '--name', self.name,
+         '--vnet', self.vnet,
+         '--public-ip-addresses', self.ipaddress,
+         '--gateway-type', self.gateway_type,
+         '--sku', self.sku,
+         '--vpn-type', self.vpn_type] 
+         + self.resource_group.args)
+
+  def _Delete(self):
+    """Deletes the virtual network gateway."""
+    delete_cmd = [azure.AZURE_PATH,
+          'network',
+          'vnet-gateway',
+          'delete',
+          '--name', self.name] 
+          + self.resource_group.args
+    vm_util.IssueCommand(delete_cmd)
+
+  @vm_util.Retry()
+  def _Exists(self):
+    """Returns true if the virtual network exists."""
+    stdout, _, _ = vm_util.IssueCommand(
+        [azure.AZURE_PATH, 'network', 'vnet-gateway', 'show',
+         '--output', 'json',
+         '--name', self.name] + self.resource_group.args,
+        suppress_warning=True)
+
+    return bool(json.loads(stdout))
+
+  """An object representing the Base VPN GW."""
+  # name = None
+  CLOUD = None
+  # ZONE = None
+  # IP_ADDR = None  # public IP of this gw
+
+  def __init__(self, zone=None, cidr=None):
+    """Initializes the BaseNetworkSpec.
+
+    Args:
+      zone: The zone in which to create the network.
+    """
+    self.ZONE = zone
+
+  @classmethod
+  def GetVPNGW(cls):
+    """Returns a BaseVPNGW.
+    This method is used instead of directly calling the class's constructor.
+    It creates BaseVPNGW instances and registers them.
+    If a BaseVPNGW object has already been registered, that object
+    will be returned rather than creating a new one. This enables multiple
+    VMs to call this method and all share the same BaseVPN object.
+    """
+    if cls.CLOUD is None:
+      raise errors.Error('VPNGWs should have CLOUD attributes.')
+    benchmark_spec = context.GetThreadBenchmarkSpec()
+    if benchmark_spec is None:
+      raise errors.Error('GetVPN called in a thread without a '
+                         'BenchmarkSpec.')
+    with benchmark_spec.vpngws_lock:
+      key = cls.CLOUD
+      if key not in benchmark_spec.vpngws:
+        benchmark_spec.vpngws[key] = cls()
+      return benchmark_spec.vpngws[key]
+
+  def AllocateIP(self):
+    pass
+
+  def SetupForwarding(self, target_gw):
+    """Create IPSec forwarding rules between the source gw and the target gw.
+    Forwards ESP protocol, and UDP 500/4500 for tunnel setup
+
+    Args:
+      source_gw: The BaseVPN object to add forwarding rules to.
+      target_gw: The BaseVPN object to point forwarding rules at.
+    """
+    pass
+
+  def SetupTunnel(self, target_gw, psk):
+    """Create IPSec tunnels  between the source gw and the target gw.
+
+    Args:
+      source_gw: The BaseVPN object to add forwarding rules to.
+      target_gw: The BaseVPN object to point forwarding rules at.
+    """
+    pass
+
+  def SetupRouting(self, target_gw):
+    """Create IPSec routes  between the source gw and the target gw.
+
+    Args:
+      source_gw: The BaseVPN object to add forwarding rules to.
+      target_gw: The BaseVPN object to point forwarding rules at.
+    """
+    pass
+
+  def Create(self):
+    """Creates the actual VPNGW."""
+    benchmark_spec = context.GetThreadBenchmarkSpec()
+    if benchmark_spec is None:
+      raise errors.Error('GetNetwork called in a thread without a '
+                         'BenchmarkSpec.')
+    # with self._lock:
+    if self.created:
+      return
+    if self.vpngw_resource:
+      self.vpngw_resource.Create()
+    key = self.name
+    # with benchmark_spec.vpngws_lock:
+    if key not in benchmark_spec.vpngws:
+      benchmark_spec.vpngws[key] = self
+    return benchmark_spec.vpngws[key]
+    self.created = True
+
+  def Delete(self):
+      """Deletes the actual VPNGW."""
+      pass
+
+  def __repr__(self):
+    return '%s(%r)' % (self.__class__, self.__dict__)
+
+#az network public-ip create --resource-group={group_name} --name={} --location={}
+class AzurePublicIPAddress(resource.BaseResource):
+  def __init__(self, location, name):
+    super(AzurePublicIPAddress, self).__init__()
+    self.name = name
+    self.resource_group = GetResourceGroup()
+    self.location = location
+    self.args = ['--public-ip-addresses', self.name]
+
+  def _Create(self):
+    """Creates the virtual network."""
+    vm_util.IssueCommand(
+        [azure.AZURE_PATH, 'network', 'public-ip', 'create',
+         '--location', self.location,
+         '--name', self.name] + self.resource_group.args)
+
+  def _Delete(self):
+    """Deletes the Public IP Address."""
+    delete_cmd = [azure.AZURE_PATH,
+              'network',
+              'public-ip',
+              'delete',
+              '--name', self.name] 
+              + self.resource_group.args
+    vm_util.IssueCommand(delete_cmd)
+
+  @vm_util.Retry()
+  def _Exists(self):
+    """Returns true if the virtual network exists."""
+    stdout, _, _ = vm_util.IssueCommand(
+        [azure.AZURE_PATH, 'network', 'public-ip', 'show',
+         '--output', 'json',
+         '--name', self.name] + self.resource_group.args,
+        suppress_warning=True)
+
+    return bool(json.loads(stdout))
 
 class AzureNetworkSecurityGroup(resource.BaseResource):
   """Object representing an Azure Network Security Group."""
