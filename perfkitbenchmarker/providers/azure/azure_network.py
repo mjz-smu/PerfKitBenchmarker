@@ -702,3 +702,43 @@ class AzureNetwork(network.BaseNetwork):
     # multiple times, but there will be no bad effects from multiple
     # deletes.
     self.resource_group.Delete()
+
+
+
+# az network vnet create --resource-group perfkit --name vnet3 --address-prefixes 10.0.0.0/16 --subnet-name=subnet3 --subnet-prefixes=10.0.0.0/16 --location=northcentralus
+
+ 
+#   vnet1
+#     EastUS
+#     192.168.0.0/16
+
+#     subnet1
+#     192.168.1.0/24
+
+#   vnet2
+#     NorthCentralUS
+#     172.16.0.0/16
+
+#     subnet2
+#     172.16.1.0/24
+
+
+# az network public-ip create --resource-group=perfkit --name=ipaddress1 --location=eastus
+  
+#   ipaddress1
+
+# az network vnet subnet create --resource-group=perfkit --vnet-name=vnet1 --name=GatewaySubnet --address-prefixes=192.168.0.0/24
+
+
+# az network vnet subnet create --resource-group=perfkit --vnet-name=vnet2 --name=GatewaySubnet --address-prefixes=172.16.0.0/24
+
+# **NOTE IT TAKES A LONG WHILE FOR THESE TO RUN
+# real  25m29.608s
+
+
+# az network vnet-gateway create --resource-group=perfkit --name=gateway1  --public-ip-addresses=ipaddress1 --vnet=vnet1 --location=eastus  --gateway-type=Vpn --sku=VpnGw1 --vpn-type=RouteBased
+
+# az network vnet-gateway create --resource-group=perfkit --name=gateway2  --public-ip-addresses=ipaddress2 --vnet=vnet2 --location=northcentralus  --gateway-type=Vpn --sku=VpnGw1 --vpn-type=RouteBased
+
+
+# time az network vpn-connection create --resource-group=perfkit --name connection1 --vnet-gateway1=gateway1 --vnet-gateway2=gateway2 --shared-key=123123
