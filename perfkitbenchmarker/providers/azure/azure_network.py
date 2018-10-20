@@ -364,40 +364,8 @@ class AzureGatewaySubnet(resource.AzureSubnet):
 
 class AzureVirtualNetworkGatewayResource(resource.BaseResource):
 
-  def __init__(self, name, network_name, region, cidr, project):
-    super(GceVPNGWResource, self).__init__()
-    self.name = name
-    self.network_name = network_name
-    self.region = region
-    self.cidr = cidr
-    self.project = project
-
-  def _Create(self):
-    cmd = util.GcloudCommand(self, 'compute', 'target-vpn-gateways', 'create',
-                             self.name)
-    cmd.flags['network'] = self.network_name
-    cmd.flags['region'] = self.region
-    cmd.Issue()
-
-  def _Exists(self):
-    cmd = util.GcloudCommand(self, 'compute', 'target-vpn-gateways', 'describe',
-                             self.name)
-    cmd.flags['region'] = self.region
-    _, _, retcode = cmd.Issue(suppress_warning=True)
-    return not retcode
-
-  def _Delete(self):
-    cmd = util.GcloudCommand(self, 'compute', 'target-vpn-gateways', 'delete',
-                             self.name)
-    cmd.flags['region'] = self.region
-    cmd.Issue()
-
-#az network vnet-gateway create --resource-group=perfkit --name=gateway1
-#  --public-ip-addresses=ipaddress1 --vnet=vnet1 --location=eastus
-#  --gateway-type=Vpn --sku=VpnGw1 --vpn-type=RouteBased
-class AzureVirtualNetworkGateway(resource.BaseVPNGW):
-  def __init__(self, location, name, ipaddress, vnet):
-    super(AzureVirtualNetwork, self).__init__()
+  def __init__(self, name, location, ipaddress, vnet):
+    super(AzureVirtualNetworkGatewayResource, self).__init__()
     self.name = name
     self.resource_group = GetResourceGroup()
     self.location = location
@@ -447,19 +415,28 @@ class AzureVirtualNetworkGateway(resource.BaseVPNGW):
 
     return bool(json.loads(stdout))
 
-  """An object representing the Base VPN GW."""
-  # name = None
-  CLOUD = None
-  # ZONE = None
-  # IP_ADDR = None  # public IP of this gw
+#az network vnet-gateway create --resource-group=perfkit --name=gateway1
+#  --public-ip-addresses=ipaddress1 --vnet=vnet1 --location=eastus
+#  --gateway-type=Vpn --sku=VpnGw1 --vpn-type=RouteBased
+class AzureVirtualNetworkGateway(resource.BaseVPNGW):
+  """An object representing the VPN gateway for Azure"""
+  CLOUD = providers.Azure
 
-  def __init__(self, zone=None, cidr=None):
-    """Initializes the BaseNetworkSpec.
-
-    Args:
-      zone: The zone in which to create the network.
-    """
-    self.ZONE = zone
+  def __init__(self, name, network_name, region, cidr, project):
+    super(AzureVirtualNetworkGateway, self).__init__()
+    self._lock = threading.Lock()
+    self.forwarding_rules = {}
+    self.tunnels = {}
+    self.routes = {}
+    self.name = name
+    self.network_name = network_name
+    self.region = region
+    self.cidr = cidr
+    self.project = project
+    self.IP_ADDR = None
+    self.vpngw_resource = GceVPNGWResource(name, location, ipaddress, vnet)
+    self.created = False
+    self.suffix = collections.defaultdict(dict)  # holds uuid tokens for naming/finding things (double dict)
 
   @classmethod
   def GetVPNGW(cls):
