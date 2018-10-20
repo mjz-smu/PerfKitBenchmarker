@@ -23,6 +23,7 @@ for more information about Azure Virtual Networks.
 
 import json
 import threading
+import logging
 
 from perfkitbenchmarker import context
 from perfkitbenchmarker import errors
@@ -275,6 +276,7 @@ class AzureVirtualNetwork(resource.BaseResource):
     # regions (should be enough for anyone), and 65536 VMs in each
     # region. Using different address spaces prevents us from
     # accidentally contacting the wrong VM.
+    self.address_space_prefix = '10.%s.' % self.vnet_num
     self.address_space = '10.%s.0.0/16' % self.vnet_num
 
   def _Create(self):
@@ -308,10 +310,14 @@ class AzureSubnet(resource.BaseResource):
     super(AzureSubnet, self).__init__()
     self.resource_group = GetResourceGroup()
     self.vnet = vnet
+    self.address_space = vnet.address_space_prefix + '0.0/24'
     self.name = name
     self.args = ['--subnet', self.name]
 
   def _Create(self):
+
+
+
     vm_util.IssueCommand(
         [azure.AZURE_PATH, 'network', 'vnet', 'subnet', 'create',
          '--vnet-name', self.vnet.name,
@@ -331,14 +337,15 @@ class AzureSubnet(resource.BaseResource):
   def _Delete(self):
     pass
 
-class AzureGatewaySubnet(resource.AzureSubnet):
+class AzureGatewaySubnet(AzureSubnet):
   """Object representing an Azure Subnet."""
 
   def __init__(self, vnet, name):
-    super(AzureSubnet, self).__init__()
+    super(AzureSubnet, self).__init__(AzureSubnet)
     self.resource_group = GetResourceGroup()
     self.vnet = vnet
     self.name = name
+    self.address_space = vnet.address_space_prefix + '1.0/27'
     self.args = ['--subnet', self.name]
 
   def _Create(self):
@@ -400,8 +407,7 @@ class AzureVirtualNetworkGatewayResource(resource.BaseResource):
           'network',
           'vnet-gateway',
           'delete',
-          '--name', self.name] 
-          + self.resource_group.args
+          '--name', self.name] + self.resource_group.args
     vm_util.IssueCommand(delete_cmd)
 
   @vm_util.Retry()
@@ -418,9 +424,10 @@ class AzureVirtualNetworkGatewayResource(resource.BaseResource):
 #az network vnet-gateway create --resource-group=perfkit --name=gateway1
 #  --public-ip-addresses=ipaddress1 --vnet=vnet1 --location=eastus
 #  --gateway-type=Vpn --sku=VpnGw1 --vpn-type=RouteBased
-class AzureVirtualNetworkGateway(resource.BaseVPNGW):
+class AzureVirtualNetworkGateway(network.BaseVPNGW):
   """An object representing the VPN gateway for Azure"""
-  CLOUD = providers.Azure
+  CLOUD = providers.AZURE
+
 
   def __init__(self, name, network_name, region, cidr, project):
     super(AzureVirtualNetworkGateway, self).__init__()
@@ -472,14 +479,23 @@ class AzureVirtualNetworkGateway(resource.BaseVPNGW):
     """
     pass
 
+  #az network vpn-connection create --resource-group=perfkit --name connection1 --vnet-gateway1=gateway1 --vnet-gateway2=gateway2 --shared-key=123123
   def SetupTunnel(self, target_gw, psk):
     """Create IPSec tunnels  between the source gw and the target gw.
 
     Args:
-      source_gw: The BaseVPN object to add forwarding rules to.
       target_gw: The BaseVPN object to point forwarding rules at.
     """
-    pass
+    vm_util.IssueCommand(
+        [azure.AZURE_PATH, 'network', 'vpn-connection', 'create',
+         '--location', self.location,
+         '--name', self.name, #TODO change name
+         '--vnet', self.vnet,
+         '--public-ip-addresses', self.ipaddress,
+         '--gateway-type', self.gateway_type,
+         '--sku', self.sku,
+         '--vpn-type', self.vpn_type] 
+         + self.resource_group.args)
 
   def SetupRouting(self, target_gw):
     """Create IPSec routes  between the source gw and the target gw.
@@ -537,8 +553,7 @@ class AzurePublicIPAddress(resource.BaseResource):
               'network',
               'public-ip',
               'delete',
-              '--name', self.name] 
-              + self.resource_group.args
+              '--name', self.name] + self.resource_group.args
     vm_util.IssueCommand(delete_cmd)
 
   @vm_util.Retry()
@@ -674,6 +689,7 @@ class AzureNetwork(network.BaseNetwork):
 
   def __init__(self, spec):
     super(AzureNetwork, self).__init__(spec)
+    
     self.resource_group = GetResourceGroup()
     avail_set_name = '%s-%s' % (self.resource_group.name, self.zone)
     self.avail_set = AzureAvailSet(avail_set_name, self.zone)
@@ -693,6 +709,13 @@ class AzureNetwork(network.BaseNetwork):
     self.subnet = AzureSubnet(self.vnet, self.vnet.name + '-subnet')
     self.nsg = AzureNetworkSecurityGroup(self.zone, self.subnet,
                                          self.subnet.name + '-nsg')
+
+    if spec.zone and spec.cidr:
+      logging.info('spec.zone: ' + str(spec.zone))
+      logging.info('spec.cidr: ' + str(spec.cidr))
+    else:
+      logging.info("NO CIDR?")
+
 
   @vm_util.Retry()
   def Create(self):
@@ -759,4 +782,4 @@ class AzureNetwork(network.BaseNetwork):
 # az network vnet-gateway create --resource-group=perfkit --name=gateway2  --public-ip-addresses=ipaddress2 --vnet=vnet2 --location=northcentralus  --gateway-type=Vpn --sku=VpnGw1 --vpn-type=RouteBased
 
 
-# time az network vpn-connection create --resource-group=perfkit --name connection1 --vnet-gateway1=gateway1 --vnet-gateway2=gateway2 --shared-key=123123
+# az network vpn-connection create --resource-group=perfkit --name connection1 --vnet-gateway1=gateway1 --vnet-gateway2=gateway2 --shared-key=123123
