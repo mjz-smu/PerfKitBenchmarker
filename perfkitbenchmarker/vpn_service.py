@@ -16,8 +16,9 @@ import itertools
 import re
 from itertools import ifilter
 import uuid
+import logging
 
-flags.DEFINE_integer('vpn_service_tunnel_count', 3,
+flags.DEFINE_integer('vpn_service_tunnel_count', 1,
                      'Number of tunnels to create for each VPNGW pair.')
 flags.DEFINE_string('vpn_service_name', None,
                     'If set, use this name for VPN Service.')
@@ -77,6 +78,7 @@ class VPN(object):
 
   def ConfigureTunnel(self, suffix=''):
     #  @TODO thread this
+    logging.info("CONFIGURE TUNNELS")
     benchmark_spec = context.GetThreadBenchmarkSpec()
     for vpngw_key in self.GWPair:
       vpngw = benchmark_spec.vpngws[vpngw_key]
@@ -84,7 +86,7 @@ class VPN(object):
         vpngw.AllocateIP()
     benchmark_spec.vpngws[self.GWPair[0]].SetupForwarding(suffix=suffix)
     benchmark_spec.vpngws[self.GWPair[1]].SetupForwarding(suffix=suffix)
-
+    
     benchmark_spec.vpngws[self.GWPair[0]].SetupTunnel(
         benchmark_spec.vpngws[self.GWPair[1]], FLAGS.run_uri, suffix=suffix)
     benchmark_spec.vpngws[self.GWPair[1]].SetupTunnel(

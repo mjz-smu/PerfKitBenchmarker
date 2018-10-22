@@ -101,6 +101,7 @@ class BaseVPNGW(object):
     Args:
       zone: The zone in which to create the network.
     """
+    self.IP_ADDR = None
     self.ZONE = zone
 
   @classmethod
