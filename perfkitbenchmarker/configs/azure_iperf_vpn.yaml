@@ -1,0 +1,24 @@
+#--project=cloud-performance-tool --benchmarks=iperf_vpn #--machine_type=f1-micro #--benchmark_config_file=iperf_vpn.yaml
+
+
+# VPN iperf config.
+iperf_vpn:
+  description: Run iperf over vpn 
+  flags:
+    iperf_vpn_sending_thread_count: 5
+    use_vpn: True
+  vpn_service:
+    tunnel_count: 1  # create multiple tunnels for ecmp load balance testing
+  vm_groups:
+    vm_1:
+      cloud: Azure
+      #cidr: 10.0.1.0/24
+      zone: eastus
+      #vm_spec: 
+            #zone: us-central1-a
+    vm_2:
+      cloud: Azure
+      #cidr: 192.168.1.0/24
+      zone: northcentralus
+      #vm_spec:
+            #zone: us-west1-c

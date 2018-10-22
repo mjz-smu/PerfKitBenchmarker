@@ -102,6 +102,7 @@ class BaseVPNGW(object):
     Args:
       zone: The zone in which to create the VPNGW.
     """
+    self.IP_ADDR = None
     self.ZONE = zone
     self.cidr = cidr
     self.require_target_to_init = False  # True if we need taget GW up front (AWS)
