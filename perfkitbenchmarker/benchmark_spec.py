@@ -437,7 +437,9 @@ class BenchmarkSpec(object):
 
   def ConstructVPNService(self):
     """Create the VPNService object."""
+    logging.info("BENCHMARK_SPEC ConstructVPNService")
     if self.config.vpn_service is None:
+      logging.info("VPN SERVICE IS NONE")
       return
     self.vpn_service_spec = self.config.vpn_service
     self.vpn_service = VPNService(self)

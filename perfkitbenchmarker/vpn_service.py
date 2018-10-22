@@ -107,6 +107,7 @@ class VPNService(resource.BaseResource):
       vpn_service_spec: spec of the vpn service.
     """
     super(VPNService, self).__init__()
+    logging.info("INITIALIZE VPN SERVICE")
     self.shared_key = spec.vpn_service_spec.shared_key
     self.name = spec.vpn_service_spec.name
     self.tunnel_count = spec.vpn_service_spec.tunnel_count
@@ -118,7 +119,7 @@ class VPNService(resource.BaseResource):
   def _Create(self):
     """Creates VPN objects for VPNGW pairs.
     """
-
+    logging.info("CREATE VPN SERVICE")
     benchmark_spec = context.GetThreadBenchmarkSpec()
     if benchmark_spec is None:
       raise errors.Error('CreateVPN Service called in a thread without a '
@@ -126,6 +127,7 @@ class VPNService(resource.BaseResource):
     # with benchmark_spec.vpngws_lock:
     self.vpngw_pairs = self.GetVPNGWPairs(benchmark_spec.vpngws)
     # with benchmark_spec.vpns_lock:
+    logging.info(self.vpngw_pairs)
     for gwpair in self.vpngw_pairs:
       # creates the vpn if it doesn't exist and registers in bm_spec.vpns
       suffix = format(uuid.uuid4().fields[1], 'x')  # unique enough
@@ -155,6 +157,8 @@ class VPNService(resource.BaseResource):
     # vpngw-us-west1-0-28ed049a <-> vpngw-us-central1-1-28ed049a # no
      # get all gw pairs then filter out the non matching tunnel id's
     vpngw_pairs = itertools.combinations(vpngws, 2)
+    logging.info("VPNGW_PAIRS")
+    logging.info(vpngw_pairs)
     r = re.compile(r"(?P<gw_prefix>.*-.*-.*)?-(?P<gw_tnum>[0-9])-(?P<run_id>.*)")
     # function = lambda x: r.search(x[0]).group('gw_tnum') == r.search(x[1]).group('gw_tnum')
     function = lambda x: r.search(x[0]).group('gw_prefix') != r.search(x[1]).group('gw_prefix')
