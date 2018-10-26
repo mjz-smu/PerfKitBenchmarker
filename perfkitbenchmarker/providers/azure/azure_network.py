@@ -36,6 +36,9 @@ from perfkitbenchmarker import vm_util
 from perfkitbenchmarker.providers import azure
 from perfkitbenchmarker.providers.azure import util
 
+
+
+
 FLAGS = flags.FLAGS
 SSH_PORT = 22
 
@@ -361,7 +364,7 @@ class AzureVirtualNetworkGatewayResource(resource.BaseResource):
     self.ipaddress = ipaddress
     self.vnet = vnet
     self.gateway_type = 'Vpn'
-    self.sku = 'VpnGw1'
+    self.sku = FLAGS.azure_vpngw_sku
     self.vpn_type='RouteBased'
 
     # Allocate a different /16 in each region. This allows for 255
@@ -431,56 +434,56 @@ class AzureVirtualNetworkGateway(network.BaseVPNGW):
     self.created = False
     self.suffix = collections.defaultdict(dict)  # holds uuid tokens for naming/finding things (double dict)
 
-  @classmethod
-  def GetVPNGW(cls):
-    """Returns a BaseVPNGW.
-    This method is used instead of directly calling the class's constructor.
-    It creates BaseVPNGW instances and registers them.
-    If a BaseVPNGW object has already been registered, that object
-    will be returned rather than creating a new one. This enables multiple
-    VMs to call this method and all share the same BaseVPN object.
-    """
-    if cls.CLOUD is None:
-      raise errors.Error('VPNGWs should have CLOUD attributes.')
-    benchmark_spec = context.GetThreadBenchmarkSpec()
-    if benchmark_spec is None:
-      raise errors.Error('GetVPN called in a thread without a '
-                         'BenchmarkSpec.')
-    with benchmark_spec.vpngws_lock:
-      key = cls.CLOUD
-      if key not in benchmark_spec.vpngws:
-        benchmark_spec.vpngws[key] = cls()
-      return benchmark_spec.vpngws[key]
+  # @classmethod
+  # def GetVPNGW(cls):
+  #   """Returns a BaseVPNGW.
+  #   This method is used instead of directly calling the class's constructor.
+  #   It creates BaseVPNGW instances and registers them.
+  #   If a BaseVPNGW object has already been registered, that object
+  #   will be returned rather than creating a new one. This enables multiple
+  #   VMs to call this method and all share the same BaseVPN object.
+  #   """
+  #   if cls.CLOUD is None:
+  #     raise errors.Error('VPNGWs should have CLOUD attributes.')
+  #   benchmark_spec = context.GetThreadBenchmarkSpec()
+  #   if benchmark_spec is None:
+  #     raise errors.Error('GetVPN called in a thread without a '
+  #                        'BenchmarkSpec.')
+  #   with benchmark_spec.vpngws_lock:
+  #     key = cls.CLOUD
+  #     if key not in benchmark_spec.vpngws:
+  #       benchmark_spec.vpngws[key] = cls()
+  #     return benchmark_spec.vpngws[key]
 
   def AllocateIP(self):
     pass
 
-  def SetupForwarding(self, target_gw):
+  def SetupForwarding(self, suffix=''):
     """Create IPSec forwarding rules between the source gw and the target gw.
     Forwards ESP protocol, and UDP 500/4500 for tunnel setup
 
     Args:
-      source_gw: The BaseVPN object to add forwarding rules to.
-      target_gw: The BaseVPN object to point forwarding rules at.
+
     """
     pass
 
   #az network vpn-connection create --resource-group=perfkit 
   #--name connection1 --vnet-gateway1=gateway1 
   #--vnet-gateway2=gateway2 --shared-key=123123
-  def SetupTunnel(self, target_gw, psk):
+  def SetupTunnel(self, target_gw, psk, suffix=''):
     """Create IPSec tunnels  between the source gw and the target gw.
 
     Args:
       target_gw: The BaseVPN object to point forwarding rules at.
     """
+    tunnel_name = self.name + "_tunnel"
     logging.info("SETUP TUNNEL --")
     vm_util.IssueCommand(
         [azure.AZURE_PATH, 'network', 'vpn-connection', 'create',
          '--location', self.location,
-         '--name', self.name, #TODO change name
+         '--name', tunnel_name, #TODO change name
          '--vnet-gateway1', self.name,
-         '--vnet-gateway2', target_gw,
+         '--vnet-gateway2', target_gw.name,
          '--shared-key', psk] 
          + self.resource_group.args)
 
@@ -491,7 +494,7 @@ class AzureVirtualNetworkGateway(network.BaseVPNGW):
          '--name', self.name] 
          + self.resource_group.args)
 
-  def SetupRouting(self, target_gw):
+  def SetupRouting(self, target_gw, suffix=''):
     """Create IPSec routes  between the source gw and the target gw.
 
     Args:
@@ -515,6 +518,9 @@ class AzureVirtualNetworkGateway(network.BaseVPNGW):
     # with benchmark_spec.vpngws_lock:
     if key not in benchmark_spec.vpngws:
       benchmark_spec.vpngws[key] = self
+
+    logging.info("BENCHMARK SPEC VPNGWS")
+    logging.info(benchmark_spec.vpngws)
     return benchmark_spec.vpngws[key]
     self.created = True
 
