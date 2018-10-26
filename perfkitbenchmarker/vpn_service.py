@@ -25,6 +25,11 @@ flags.DEFINE_string('vpn_service_name', None,
 flags.DEFINE_string('vpn_service_shared_key', None,
                     'If set, use this PSK for VPNs.')
 
+Gateway_types = ['VpnGw1', 'VpnGw2', 'VpnGw3', 'Basic']
+
+flags.DEFINE_enum('azure_vpngw_sku', 'VpnGw1', Gateway_types,
+                    'Azure VPN Gateway sku to use')
+
 FLAGS = flags.FLAGS
 
 
@@ -127,10 +132,16 @@ class VPNService(resource.BaseResource):
     # with benchmark_spec.vpngws_lock:
     self.vpngw_pairs = self.GetVPNGWPairs(benchmark_spec.vpngws)
     # with benchmark_spec.vpns_lock:
-    logging.info(self.vpngw_pairs)
+    logging.info(benchmark_spec.vpngws)
+    logging.info(self.vpngw_pairs.__str__())
+    logging.info(self.vpngw_pairs.__repr__())
     for gwpair in self.vpngw_pairs:
+      logging.info("gwpair")
+      logging.info(gwpair)
       # creates the vpn if it doesn't exist and registers in bm_spec.vpns
       suffix = format(uuid.uuid4().fields[1], 'x')  # unique enough
+      logging.info("SUFFIX")
+      logging.info(suffix)
       vpn = VPN()
       vpn = vpn.GetVPN(gwpair)
       vpn.ConfigureTunnel(suffix=suffix)
@@ -155,11 +166,15 @@ class VPNService(resource.BaseResource):
   def GetVPNGWPairs(self, vpngws):
     # vpngw-us-west1-0-28ed049a <-> vpngw-us-central1-0-28ed049a # yes
     # vpngw-us-west1-0-28ed049a <-> vpngw-us-central1-1-28ed049a # no
+    # vpngw-eastus-0-9cd7d093
      # get all gw pairs then filter out the non matching tunnel id's
     vpngw_pairs = itertools.combinations(vpngws, 2)
     logging.info("VPNGW_PAIRS")
     logging.info(vpngw_pairs)
-    r = re.compile(r"(?P<gw_prefix>.*-.*-.*)?-(?P<gw_tnum>[0-9])-(?P<run_id>.*)")
+
+    benchmark_spec = context.GetThreadBenchmarkSpec()
+
+    r = re.compile(r"(?P<gw_prefix>.*-.*)+-(?P<gw_tnum>[0-9])-(?P<run_id>.*)")
     # function = lambda x: r.search(x[0]).group('gw_tnum') == r.search(x[1]).group('gw_tnum')
     function = lambda x: r.search(x[0]).group('gw_prefix') != r.search(x[1]).group('gw_prefix')
     return ifilter(function, vpngw_pairs)
