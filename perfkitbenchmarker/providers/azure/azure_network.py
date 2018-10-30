@@ -339,6 +339,7 @@ class AzureSubnet(resource.BaseResource):
   def _Delete(self):
     pass
 
+
 class AzureGatewaySubnet(resource.BaseResource):
   """Object representing an Azure Subnet."""
 
@@ -382,7 +383,7 @@ class AzureVirtualNetworkGatewayResource(resource.BaseResource):
     self.vnet = vnet
     self.gateway_type = 'Vpn'
     self.sku = FLAGS.azure_vpngw_sku
-    self.vpn_type='RouteBased'
+    self.vpn_type = 'RouteBased'
 
   def _Create(self):
     """Creates the virtual network."""
@@ -394,16 +395,16 @@ class AzureVirtualNetworkGatewayResource(resource.BaseResource):
          '--public-ip-addresses', self.ipaddress,
          '--gateway-type', self.gateway_type,
          '--sku', self.sku,
-         '--vpn-type', self.vpn_type] 
+         '--vpn-type', self.vpn_type]
          + self.resource_group.args, timeout=3600)
 
   def _Delete(self):
     """Deletes the virtual network gateway."""
     delete_cmd = [azure.AZURE_PATH,
-          'network',
-          'vnet-gateway',
-          'delete',
-          '--name', self.name] + self.resource_group.args
+                  'network',
+                  'vnet-gateway',
+                  'delete',
+                  '--name', self.name] + self.resource_group.args
     vm_util.IssueCommand(delete_cmd, timeout=3600)
 
   @vm_util.Retry()
@@ -449,9 +450,9 @@ class AzureLocalNetworkGatewayResource(resource.BaseResource):
     """Creates the virtual network."""
 
     cmd = [azure.AZURE_PATH, 'network', 'local-gateway', 'create',
-         '--location', self.location,
-         '--name', self.name,
-         '--gateway-ip-address', self.ipaddress]
+           '--location', self.location,
+           '--name', self.name,
+           '--gateway-ip-address', self.ipaddress]
 
     if self.local_address_prefixes:
       cmd.append('--local-address-prefixes')
@@ -461,10 +462,10 @@ class AzureLocalNetworkGatewayResource(resource.BaseResource):
   def _Delete(self):
     """Deletes the virtual network gateway."""
     delete_cmd = [azure.AZURE_PATH,
-          'network',
-          'local-gateway',
-          'delete',
-          '--name', self.name] + self.resource_group.args
+                  'network',
+                  'local-gateway',
+                  'delete',
+                  '--name', self.name] + self.resource_group.args
     vm_util.IssueCommand(delete_cmd)
 
   @vm_util.Retry()
@@ -644,10 +645,10 @@ class AzurePublicIPAddress(resource.BaseResource):
   def _Delete(self):
     """Deletes the Public IP Address."""
     delete_cmd = [azure.AZURE_PATH,
-              'network',
-              'public-ip',
-              'delete',
-              '--name', self.name] + self.resource_group.args
+                  'network',
+                  'public-ip',
+                  'delete',
+                  '--name', self.name] + self.resource_group.args
     vm_util.IssueCommand(delete_cmd)
 
   @vm_util.Retry()
@@ -805,7 +806,7 @@ class AzureNetwork(network.BaseNetwork):
                                          self.subnet.name + '-nsg')
 
     self.gateway_ip = None
-    self.gateway_subnet = None                     
+    self.gateway_subnet = None
     self.vpngw = {}
 
     if FLAGS.use_vpn:
@@ -815,10 +816,12 @@ class AzureNetwork(network.BaseNetwork):
       tunnel_count = FLAGS.vpn_service_tunnel_count
 
       if FLAGS.vpn_service_tunnel_count > 1:
-        logging.warning("--vpn_service_tunnel_count=" + str(FLAGS.vpn_service_tunnel_count) +
-                        " Only 1 Virtual Network Gateway allowed per vnet in Azure." +
-                        " Flag value will be ignored for Azure vnets and only" +
-                        " 1 gateway will be created in this vnet.")
+        logging.warning("--vpn_service_tunnel_count=" +
+                        str(FLAGS.vpn_service_tunnel_count) +
+                        " Only 1 Virtual Network Gateway allowed per" +
+                        " vnet in Azure. Flag value will be ignored for" +
+                        " Azure vnets and only 1 gateway will be" +
+                        " created in this vnet.")
         tunnel_count = 1
 
       for tunnelnum in range(0, tunnel_count):
