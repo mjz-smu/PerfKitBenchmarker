@@ -17,8 +17,6 @@ iperf_vpn:
       #vm_spec: 
             #zone: us-central1-a
     vm_2:
-      cloud: Azure
-      #cidr: 192.168.1.0/24
-      zone: centralus
-      #vm_spec:
-            #zone: us-west1-c
+      cloud: GCP
+      cidr: 192.168.1.0/24
+      zone: us-central1-b

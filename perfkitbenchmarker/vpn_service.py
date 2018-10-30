@@ -89,9 +89,11 @@ class VPN(object):
       vpngw = benchmark_spec.vpngws[vpngw_key]
       if vpngw.IP_ADDR is None:
         vpngw.AllocateIP()
+
+
     benchmark_spec.vpngws[self.GWPair[0]].SetupForwarding(suffix=suffix)
     benchmark_spec.vpngws[self.GWPair[1]].SetupForwarding(suffix=suffix)
-    
+
     benchmark_spec.vpngws[self.GWPair[0]].SetupTunnel(
         benchmark_spec.vpngws[self.GWPair[1]], FLAGS.run_uri, suffix=suffix)
     benchmark_spec.vpngws[self.GWPair[1]].SetupTunnel(
@@ -167,7 +169,7 @@ class VPNService(resource.BaseResource):
     # vpngw-us-west1-0-28ed049a <-> vpngw-us-central1-0-28ed049a # yes
     # vpngw-us-west1-0-28ed049a <-> vpngw-us-central1-1-28ed049a # no
     # vpngw-eastus-0-9cd7d093
-     # get all gw pairs then filter out the non matching tunnel id's
+    # get all gw pairs then filter out the non matching tunnel id's
     vpngw_pairs = itertools.combinations(vpngws, 2)
     logging.info("VPNGW_PAIRS")
     logging.info(vpngw_pairs)
