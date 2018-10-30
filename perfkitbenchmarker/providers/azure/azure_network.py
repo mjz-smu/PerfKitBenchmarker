@@ -21,6 +21,8 @@ the same project. See http://msdn.microsoft.com/library/azure/jj156007.aspx
 for more information about Azure Virtual Networks.
 """
 
+#TODO add CIDR options like in GCP
+
 import json
 import threading
 import logging
@@ -35,9 +37,6 @@ from perfkitbenchmarker import resource
 from perfkitbenchmarker import vm_util
 from perfkitbenchmarker.providers import azure
 from perfkitbenchmarker.providers.azure import util
-
-
-
 
 FLAGS = flags.FLAGS
 SSH_PORT = 22
