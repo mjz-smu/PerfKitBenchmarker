@@ -385,12 +385,6 @@ class AzureVirtualNetworkGatewayResource(resource.BaseResource):
     self.sku = FLAGS.azure_vpngw_sku
     self.vpn_type='RouteBased'
 
-    # Allocate a different /16 in each region. This allows for 255
-    # regions (should be enough for anyone), and 65536 VMs in each
-    # region. Using different address spaces prevents us from
-    # accidentally contacting the wrong VM.
-    #self.address_space = '10.%s.0.0/16' % self.vnet_num
-
   def _Create(self):
     """Creates the virtual network."""
     vm_util.IssueCommand(
@@ -452,19 +446,13 @@ class AzureLocalNetworkGatewayResource(resource.BaseResource):
     self.ipaddress = ipaddress
     self.local_address_prefixes = local_address_prefixes
 
-    # Allocate a different /16 in each region. This allows for 255
-    # regions (should be enough for anyone), and 65536 VMs in each
-    # region. Using different address spaces prevents us from
-    # accidentally contacting the wrong VM.
-    #self.address_space = '10.%s.0.0/16' % self.vnet_num
-
   def _Create(self):
     """Creates the virtual network."""
 
     cmd = [azure.AZURE_PATH, 'network', 'local-gateway', 'create',
          '--location', self.location,
          '--name', self.name,
-         '--gateway-ip-addresses', self.ipaddress]
+         '--gateway-ip-address', self.ipaddress]
 
     if self.local_address_prefixes:
       cmd.append('--local-address-prefixes')
@@ -515,15 +503,14 @@ class AzureVirtualNetworkGateway(network.BaseVPNGW):
     self.location = location
     self.cidr = self.vnet.address_space
 
-    #this is an AzurePublicIPAddress object
+    # this is an AzurePublicIPAddress object
     self.public_ip = public_ip
-    
-    #this is the IP address string that is used by VPN.GetVPN
+
+    # this is the IP address string that is used by VPN.GetVPN
     self.IP_ADDR = None
     self.gateway_subnet = gateway_subnet
-    self.vpngw_resource = AzureVirtualNetworkGatewayResource(name, location, 
-                                                             self.public_ip.name, 
-                                                             self.vnet.name)
+    self.vpngw_resource = AzureVirtualNetworkGatewayResource(name,
+                            location, self.public_ip.name, self.vnet.name)
     self.created = False
     self.suffix = collections.defaultdict(dict)  # holds uuid tokens for naming/finding things (double dict)
     self.cloud = AzureVirtualNetworkGateway.CLOUD
@@ -531,24 +518,20 @@ class AzureVirtualNetworkGateway(network.BaseVPNGW):
     self.require_target_to_init = False
     self.localGateway = None
 
+  def SetupForwarding(self, suffix=''):
+    pass
+
+  def SetupRouting(self, target_gw, suffix=''):
+    pass
 
   def AllocateIP(self):
     self.IP_ADDR = self.vpngw_resource.GetIPAddress()
     logging.info("IP ADDRESS")
     logging.info(self.IP_ADDR)
 
-  def SetupForwarding(self, suffix=''):
-    """Create IPSec forwarding rules between the source gw and the target gw.
-    Forwards ESP protocol, and UDP 500/4500 for tunnel setup
-
-    Args:
-
-    """
-    pass
-
-  #az network vpn-connection create --resource-group=perfkit 
-  #--name connection1 --vnet-gateway1=gateway1 
-  #--vnet-gateway2=gateway2 --shared-key=123123
+  # az network vpn-connection create --resource-group=perfkit
+  # --name connection1 --vnet-gateway1=gateway1
+  # --vnet-gateway2=gateway2 --shared-key=123123
   def SetupTunnel(self, target_gw, psk, suffix=''):
     """Create IPSec tunnels  between the source gw and the target gw.
 
@@ -561,50 +544,38 @@ class AzureVirtualNetworkGateway(network.BaseVPNGW):
     logging.info("SETUP TUNNEL --")
     cmd = []
 
-    #localGateway = None
     # TODO setup local gateway for not azure vpn gateways
     if target_gw.CLOUD != 'Azure':
-      # name, location, ipaddress, local_address_prefixes = None
       # TODO change name parameter
       logging.info("INTER CLOUD GATEWAY DETECTED")
       self.localGateway = AzureLocalNetworkGatewayResource(target_gw.name,
-                                                      self.location,
-                                                      target_gw.IP_ADDR,
-                                                      target_gw.cidr)
+                                                           self.location,
+                                                           target_gw.IP_ADDR,
+                                                           target_gw.cidr)
       self.localGateway.Create()
 
       cmd = [azure.AZURE_PATH, 'network', 'vpn-connection', 'create',
-            '--location', self.location,
-            '--name', tunnel_name, 
-            '--vnet-gateway1', self.name,
-            '--local-gateway2', target_gw.name,
-            '--shared-key', psk] 
-
+             '--location', self.location,
+             '--name', tunnel_name,
+             '--vnet-gateway1', self.name,
+             '--local-gateway2', target_gw.name,
+             '--shared-key', psk]
 
     else:
       cmd = [azure.AZURE_PATH, 'network', 'vpn-connection', 'create',
-            '--location', self.location,
-            '--name', tunnel_name,
-            '--vnet-gateway1', self.name,
-            '--vnet-gateway2', target_gw.name,
-            '--shared-key', psk] 
-    
+             '--location', self.location,
+             '--name', tunnel_name,
+             '--vnet-gateway1', self.name,
+             '--vnet-gateway2', target_gw.name,
+             '--shared-key', psk]
+
     vm_util.IssueCommand(cmd + self.resource_group.args)
 
   def DeleteTunnel(self, tunnel):
     """Delete IPSec tunnel"""
     vm_util.IssueCommand(
         [azure.AZURE_PATH, 'network', 'vpn-connection', 'delete',
-         '--name', self.name] 
-         + self.resource_group.args)
-
-  def SetupRouting(self, target_gw, suffix=''):
-    """Create IPSec routes  between the source gw and the target gw.
-
-    Args:
-      target_gw: The BaseVPN object to point forwarding rules at.
-    """
-    pass
+         '--name', self.name] + self.resource_group.args)
 
   def Create(self):
     """Creates the actual VPNGW."""
@@ -618,7 +589,7 @@ class AzureVirtualNetworkGateway(network.BaseVPNGW):
     if self.vpngw_resource:
       self.vpngw_resource.Create()
 
-    #self.vpngw_resource._Exists()
+    # self.vpngw_resource._Exists()
     self.IP_ADDR = self.vpngw_resource.GetIPAddress()
     logging.info("IP ADDRESS")
     logging.info(self.IP_ADDR)
@@ -632,26 +603,16 @@ class AzureVirtualNetworkGateway(network.BaseVPNGW):
     logging.info(benchmark_spec.vpngws)
     self.created = True
     return benchmark_spec.vpngws[key]
-    
 
   def Delete(self):
     """Deletes the actual VPNGW."""
     # if self.IP_ADDR and self.IPExists():
     #   self.DeleteIP()
 
-    # if self.forwarding_rules:
-    #   for fr in self.forwarding_rules:
-    #     self.forwarding_rules[fr].Delete()
-
     if self.tunnels:
       for tun in self.tunnels:
         if self.TunnelExists(tun):
           self.DeleteTunnel(tun)
-
-    # if self.routes:
-    #   for route in self.routes:
-    #     if self.RouteExists(route):
-    #       self.DeleteRoute(route)
 
     # self.created = False
 
@@ -665,7 +626,7 @@ class AzureVirtualNetworkGateway(network.BaseVPNGW):
   def __repr__(self):
     return '%s(%r)' % (self.__class__, self.__dict__)
 
-#az network public-ip create --resource-group={group_name} --name={} --location={}
+# az network public-ip create --resource-group={group_name} --name={} --location={}
 class AzurePublicIPAddress(resource.BaseResource):
   def __init__(self, location, name):
     super(AzurePublicIPAddress, self).__init__()
@@ -848,16 +809,20 @@ class AzureNetwork(network.BaseNetwork):
     self.gateway_subnet = None                     
     self.vpngw = {}
 
-    if spec.zone and spec.cidr:
-      logging.info('spec.zone: ' + str(spec.zone))
-      logging.info('spec.cidr: ' + str(spec.cidr))
-
     if FLAGS.use_vpn:
       logging.info("USE VPN")
       logging.info("num tunnels: " + str(FLAGS.vpn_service_tunnel_count))
 
-      #TODO change to support mult tunnels?
-      for tunnelnum in range(0, FLAGS.vpn_service_tunnel_count):
+      tunnel_count = FLAGS.vpn_service_tunnel_count
+
+      if FLAGS.vpn_service_tunnel_count > 1:
+        logging.warning("--vpn_service_tunnel_count=" + str(FLAGS.vpn_service_tunnel_count) +
+                        " Only 1 Virtual Network Gateway allowed per vnet in Azure." +
+                        " Flag value will be ignored for Azure vnets and only" +
+                        " 1 gateway will be created in this vnet.")
+        tunnel_count = 1
+
+      for tunnelnum in range(0, tunnel_count):
         vpngw_name = 'vpngw-%s-%s-%s' % (
             self.zone, tunnelnum, FLAGS.run_uri)
         ip_name = 'public-ip-gateway-%s-%s' % (self.zone, FLAGS.run_uri)
@@ -867,10 +832,6 @@ class AzureNetwork(network.BaseNetwork):
         self.vpngw[vpngw_name] = AzureVirtualNetworkGateway(
             vpngw_name, self.vnet, self.zone,
             self.gateway_subnet, self.gateway_ip)
-
-
-
-
 
   @vm_util.Retry()
   def Create(self):
