@@ -264,7 +264,7 @@ class VPNService(resource.BaseResource):
     # vpngw-us-west1-0-28ed049a <-> vpngw-us-central1-0-28ed049a # yes
     # vpngw-us-west1-0-28ed049a <-> vpngw-us-central1-1-28ed049a # no
     # vpngw-eastus-0-9cd7d093
-     # get all gw pairs then filter out the non matching tunnel id's
+    # get all gw pairs then filter out the non matching tunnel id's
     vpngw_pairs = itertools.combinations(vpngws, 2)
     logging.info("VPNGW_PAIRS")
     logging.info(vpngw_pairs)
