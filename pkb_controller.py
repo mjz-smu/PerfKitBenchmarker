@@ -116,6 +116,9 @@ def build_command(args, benchmark, zone1, zone2):
                str(args.iperf_runtime_in_seconds))
     cmd.append('--iperf_sending_thread_count=' +
                str(args.iperf_sending_thread_count))
+    cmd.append('--config_override=iperf.vm_groups.vm_1.vm_spec.GCP.zone=' + zone1)
+    cmd.append('--config_override=iperf.vm_groups.vm_2.vm_spec.GCP.zone=' + zone2)
+
 
   elif benchmark == 'iperf_vpn':
     cmd.append('--benchmarks=iperf_vpn')
@@ -127,6 +130,12 @@ def build_command(args, benchmark, zone1, zone2):
                str(args.tunnel_count))
     cmd.append('--config_override=iperf_vpn.vm_groups.vm_1.cidr=10.0.1.0/24')
 
+  elif benchmark == 'ping':
+    cmd.append('--benchmarks=ping')
+    cmd.append('--config_override=ping.vm_groups.vm_1.vm_spec.GCP.zone=' + zone1)
+    cmd.append('--config_override=ping.vm_groups.vm_2.vm_spec.GCP.zone=' + zone2)
+
+
   cmd.append('--machine_type=' + args.machine_type)
   if args.bq_path:
     cmd.append('--bq_path=' + args.bq_path)
@@ -135,8 +144,8 @@ def build_command(args, benchmark, zone1, zone2):
   if args.bq_project:
     cmd.append('--bq_project=' + args.bq_project)
 
-  cmd.append('--config_override=iperf.vm_groups.vm_1.vm_spec.GCP.zone=' + zone1)
-  cmd.append('--config_override=iperf.vm_groups.vm_2.vm_spec.GCP.zone=' + zone2)
+  # cmd.append('--config_override=iperf.vm_groups.vm_1.vm_spec.GCP.zone=' + zone1)
+  # cmd.append('--config_override=iperf.vm_groups.vm_2.vm_spec.GCP.zone=' + zone2)
 
   # cmd.append('--iperf_vpn_sending_thread_count=' + 
   #            args.iperf_vpn_sending_thread_count)
@@ -301,6 +310,10 @@ def add_args(parser):
                       help='Service account to use to authenticate with BQ.')
   parser.add_argument('--service_account_private_key', type=str,
                       help='Service private key for authenticating with BQ.')
+
+  parser.add_argument('--arg_string', type=str,
+                       help='whole string of args to pass pkb, separated by commas,'
+                       'surrounded by doublequotes')
 
 
 def str2bool(v):
