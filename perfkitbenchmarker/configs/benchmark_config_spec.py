@@ -1216,6 +1216,9 @@ class _VPNServiceSpec(spec.BaseSpec):
         'tunnel_count': (option_decoders.IntDecoder, {
             'default': 1,
             'none_ok': True}),
+        'routing_type': (option_decoders.StringDecoder, {
+            'default': 'static',
+            'none_ok': True}),
     })
     return result
 
@@ -1236,6 +1239,8 @@ class _VPNServiceSpec(spec.BaseSpec):
       config_values['name'] = flag_values.vpn_service_name
     if flag_values['vpn_service_shared_key'].present:
       config_values['shared_key'] = flag_values.vpn_service_shared_key
+    if flag_values['vpn_service_routing_type'].present:
+      config_values['routing_type'] = flag_values.vpn_service_routing_type
 
 
 class _VPNServiceDecoder(option_decoders.TypeVerifier):
