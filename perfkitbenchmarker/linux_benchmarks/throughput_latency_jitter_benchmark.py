@@ -160,10 +160,6 @@ def _RunIperf(sending_vm, receiving_vm, receiving_ip_address, ip_type):
   Returns:
     A Sample.
   """
-  iperf_ver = ('iperf -v')
-  stdout, _ = sending_vm.RemoteCommand(iperf_ver, should_log=True, ignore_failure=False)
-
-  logging.info(stdout)
 
   iperf_cmd = ('iperf --client %s --port %s --format m --time %s -P %s' %
                (receiving_ip_address, IPERF_PORT,
