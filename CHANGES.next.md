@@ -85,6 +85,8 @@
 - Adding support for AWS ARM machine types.
 - Adding support for AWS ARM machines on SPECCPU.
 - Added Horovod distributed Tensorflow traning benchmark.
+- Added ability to specify netperf `tcp_rr` and `udp_rr` test lengths in 
+  transactions with `netperf_rr_test_length` flag
 
 ### Enhancements:
 - Support for ProfitBricks API v4:

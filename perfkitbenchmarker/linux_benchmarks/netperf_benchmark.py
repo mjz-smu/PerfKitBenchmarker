@@ -42,9 +42,11 @@ flags.DEFINE_integer('netperf_max_iter', None,
                      'confidence interval estimation. If unset, '
                      'a single iteration will be run.',
                      lower_bound=3, upper_bound=30)
-
 flags.DEFINE_integer('netperf_test_length', 60,
                      'netperf test length, in seconds',
+                     lower_bound=1)
+flags.DEFINE_integer('netperf_rr_test_length', None,
+                     'netperf TCP/UDP RR test length in transactions',
                      lower_bound=1)
 flags.DEFINE_bool('netperf_enable_histograms', True,
                   'Determines whether latency histograms are '
@@ -328,20 +330,64 @@ def RunNetperf(vm, benchmark_name, server_ip, num_streams):
   confidence = ('-I 99,5 -i {0},3'.format(FLAGS.netperf_max_iter)
                 if FLAGS.netperf_max_iter else '')
   verbosity = '-v2 ' if enable_latency_histograms else ''
-  netperf_cmd = ('{netperf_path} -p {{command_port}} -j {verbosity} '
-                 '-t {benchmark_name} -H {server_ip} -l {length} {confidence}'
-                 ' -- '
-                 '-P ,{{data_port}} '
-                 '-o THROUGHPUT,THROUGHPUT_UNITS,P50_LATENCY,P90_LATENCY,'
-                 'P99_LATENCY,STDDEV_LATENCY,'
-                 'MIN_LATENCY,MAX_LATENCY,'
-                 'CONFIDENCE_ITERATION,THROUGHPUT_CONFID,'
-                 'LOCAL_TRANSPORT_RETRANS,REMOTE_TRANSPORT_RETRANS').format(
-                     netperf_path=netperf.NETPERF_PATH,
-                     benchmark_name=benchmark_name,
-                     server_ip=server_ip,
-                     length=FLAGS.netperf_test_length,
-                     confidence=confidence, verbosity=verbosity)
+
+
+  netperf_cmd = ""
+
+  remote_cmd_timeout = \
+      FLAGS.netperf_test_length * (FLAGS.netperf_max_iter or 1) + 300
+
+  metadata = {}
+
+  #TODO change timeout and stuff depending on netperf flags and netperf test
+  if (benchmark_name.upper() == 'TCP_RR' or benchmark_name.upper() == 'UDP_RR') and FLAGS.netperf_rr_test_length:
+    netperf_cmd = ('{netperf_path} -p {{command_port}} -j {verbosity} '
+                   '-t {benchmark_name} -H {server_ip} -l {length} {confidence}'
+                   ' -- '
+                   '-P ,{{data_port}} '
+                   '-o THROUGHPUT,THROUGHPUT_UNITS,P50_LATENCY,P90_LATENCY,'
+                   'P99_LATENCY,STDDEV_LATENCY,'
+                   'MIN_LATENCY,MAX_LATENCY,'
+                   'CONFIDENCE_ITERATION,THROUGHPUT_CONFID,'
+                   'LOCAL_TRANSPORT_RETRANS,REMOTE_TRANSPORT_RETRANS,'
+                   'ELAPSED_TIME').format(
+                       netperf_path=netperf.NETPERF_PATH,
+                       benchmark_name=benchmark_name,
+                       server_ip=server_ip,
+                       length=(-1 * abs(FLAGS.netperf_rr_test_length)),
+                       confidence=confidence, verbosity=verbosity)
+
+    remote_cmd_timeout = \
+      FLAGS.netperf_rr_test_length * 0.0001 * (FLAGS.netperf_max_iter or 1) + 300
+
+    # Metadata to attach to samples
+    metadata = {'netperf_test_length': FLAGS.netperf_rr_test_length,
+                'netperf_test_length_unit': 'transactions',
+                'max_iter': FLAGS.netperf_max_iter or 1,
+                'sending_thread_count': num_streams}
+
+  else:
+    netperf_cmd = ('{netperf_path} -p {{command_port}} -j {verbosity} '
+                   '-t {benchmark_name} -H {server_ip} -l {length} {confidence}'
+                   ' -- '
+                   '-P ,{{data_port}} '
+                   '-o THROUGHPUT,THROUGHPUT_UNITS,P50_LATENCY,P90_LATENCY,'
+                   'P99_LATENCY,STDDEV_LATENCY,'
+                   'MIN_LATENCY,MAX_LATENCY,'
+                   'CONFIDENCE_ITERATION,THROUGHPUT_CONFID,'
+                   'LOCAL_TRANSPORT_RETRANS,REMOTE_TRANSPORT_RETRANS,'
+                   'ELAPSED_TIME').format(
+                       netperf_path=netperf.NETPERF_PATH,
+                       benchmark_name=benchmark_name,
+                       server_ip=server_ip,
+                       length=FLAGS.netperf_test_length,
+                       confidence=confidence, verbosity=verbosity)
+
+    metadata = {'netperf_test_length': FLAGS.netperf_test_length,
+                'netperf_test_length_unit': 'seconds',
+                'max_iter': FLAGS.netperf_max_iter or 1,
+                'sending_thread_count': num_streams}
+
   if FLAGS.netperf_thinktime != 0:
     netperf_cmd += (' -X {thinktime},{thinktime_array_size},'
                     '{thinktime_run_length} ').format(
@@ -354,8 +400,7 @@ def RunNetperf(vm, benchmark_name, server_ip, num_streams):
 
   # Give the remote script the max possible test length plus 5 minutes to
   # complete
-  remote_cmd_timeout = \
-      FLAGS.netperf_test_length * (FLAGS.netperf_max_iter or 1) + 300
+  
   remote_cmd = ('./%s --netperf_cmd="%s" --num_streams=%s --port_start=%s' %
                 (REMOTE_SCRIPT, netperf_cmd, num_streams, PORT_START))
   remote_stdout, _ = vm.RemoteCommand(remote_cmd,
@@ -365,10 +410,7 @@ def RunNetperf(vm, benchmark_name, server_ip, num_streams):
   json_out = json.loads(remote_stdout)
   stdouts = json_out[0]
 
-  # Metadata to attach to samples
-  metadata = {'netperf_test_length': FLAGS.netperf_test_length,
-              'max_iter': FLAGS.netperf_max_iter or 1,
-              'sending_thread_count': num_streams}
+  
 
   parsed_output = [ParseNetperfOutput(stdout, metadata, benchmark_name,
                                       enable_latency_histograms)
