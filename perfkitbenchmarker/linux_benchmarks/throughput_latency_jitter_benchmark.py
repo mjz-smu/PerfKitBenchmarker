@@ -93,6 +93,8 @@ def Prepare(benchmark_spec):  # pylint: disable=unused-argument
     # TODO store this in a better place once we have a better place
     vm.iperf_server_pid = stdout.strip()
 
+  #iperf_benchmark.Prepare(benchmark_spec)
+  #ping_benchmark.Prepare(benchmark_spec)
   netperf_benchmark.Prepare(benchmark_spec)
 
 
@@ -138,15 +140,20 @@ def Run(benchmark_spec):
                                receiving_vm.internal_ip,
                                'internal'))
 
-
+  #ping_results = ping_benchmark.Run(benchmark_spec)
+  #iperf_results = iperf_benchmark.Run(benchmark_spec)
   netperf_results = netperf_benchmark.Run(benchmark_spec)
-
-  for sample in netperf_results:
-    sample['metadata']['benchmark_name'] = 'netperf'
-
-
+  print("NETPERF RESULTS")
   print(type(netperf_results))
-  print(netperf_results)
+  for sample in netperf_results:
+    print("SAMPLE")
+    print(type(sample))
+    print(sample)
+    sample.metadata['benchmark_name'] = 'netperf'
+    #sample['metadata']['benchmark_name'] = 'netperf'
+
+  results = results + netperf_results
+
   return results
 
 
@@ -268,4 +275,5 @@ def Cleanup(benchmark_spec):  # pylint: disable=unused-argument
     benchmark_spec: The benchmark specification. Contains all data that is
         required to run the benchmark.
   """
+  netperf_benchmark.Cleanup(benchmark_spec)
   pass
