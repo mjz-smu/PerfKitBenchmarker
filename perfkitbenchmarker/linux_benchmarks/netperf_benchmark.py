@@ -87,7 +87,7 @@ MBPS = 'Mbits/sec'
 TRANSACTIONS_PER_SECOND = 'transactions_per_second'
 
 # Command ports are even (id*2), data ports are odd (id*2 + 1)
-PORT_START = 20000
+PORT_START = 10000
 
 REMOTE_SCRIPTS_DIR = 'netperf_test_scripts'
 REMOTE_SCRIPT = 'netperf_test.py'
@@ -117,6 +117,7 @@ def Prepare(benchmark_spec):
     benchmark_spec: The benchmark specification. Contains all data that is
         required to run the benchmark.
   """
+  logging.info("RUNNING NETPERF Prepare")
   vms = benchmark_spec.vms
   vms = vms[:2]
   vm_util.RunThreaded(PrepareNetperf, vms)

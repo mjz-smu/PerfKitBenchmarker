@@ -23,6 +23,9 @@ from perfkitbenchmarker import vm_util
 from perfkitbenchmarker import configs
 from perfkitbenchmarker import flags
 from perfkitbenchmarker import sample
+from perfkitbenchmarker.linux_benchmarks import netperf_benchmark
+from perfkitbenchmarker.linux_benchmarks import iperf_benchmark
+from perfkitbenchmarker.linux_benchmarks import ping_benchmark
 import re
 
 
@@ -90,6 +93,8 @@ def Prepare(benchmark_spec):  # pylint: disable=unused-argument
     # TODO store this in a better place once we have a better place
     vm.iperf_server_pid = stdout.strip()
 
+  netperf_benchmark.Prepare(benchmark_spec)
+
 
 def Run(benchmark_spec):
   """Run ping on the target vm.
@@ -133,6 +138,15 @@ def Run(benchmark_spec):
                                receiving_vm.internal_ip,
                                'internal'))
 
+
+  netperf_results = netperf_benchmark.Run(benchmark_spec)
+
+  for sample in netperf_results:
+    sample['metadata']['benchmark_name'] = 'netperf'
+
+
+  print(type(netperf_results))
+  print(netperf_results)
   return results
 
 
