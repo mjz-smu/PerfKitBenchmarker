@@ -18,6 +18,8 @@
 import re
 
 from perfkitbenchmarker import errors
+from perfkitbenchmarker import vm_util
+from perfkitbenchmarker.linux_packages import INSTALL_DIR
 
 IPERF_EL6_RPM = ('http://pkgs.repoforge.org/iperf/'
                  'iperf-2.0.4-1.el6.rf.x86_64.rpm')
@@ -25,10 +27,19 @@ IPERF_EL7_RPM = ('http://pkgs.repoforge.org/iperf/'
                  'iperf-2.0.4-1.el7.rf.x86_64.rpm')
 
 
+IPERF_TAG = 'iperf2'
+IPERF_DIR = '%s/%s' % (INSTALL_DIR, IPERF_TAG)
+IPERF_URL = 'https://git.code.sf.net/p/iperf2/code'
+
 def _Install(vm):
   """Installs the iperf package on the VM."""
-  vm.InstallPackages('iperf')
-
+  #vm.InstallPackages('iperf')
+  vm.InstallPackages('gcc')
+  vm.InstallPackages('g++')
+  vm.InstallPackages('git')
+  vm.InstallPackages('make')
+  vm.RemoteCommand('cd %s && git clone %s %s' % (INSTALL_DIR, IPERF_URL, IPERF_TAG))
+  vm.RemoteCommand('cd %s && ./configure && make && sudo make install' % IPERF_DIR)
 
 def YumInstall(vm):
   """Installs the iperf package on the VM."""
