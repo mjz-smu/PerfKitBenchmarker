@@ -91,6 +91,8 @@ def Run(benchmark_spec):
     print(type(sample))
     print(sample)
     sample.metadata['benchmark_name'] = 'ping'
+    if FLAGS.gcp_network_tier:
+      sample.metadata['network_tier'] = FLAGS.gcp_network_tier
 
   iperf_results = iperf_benchmark.Run(benchmark_spec)
   for sample in iperf_results:
@@ -98,6 +100,8 @@ def Run(benchmark_spec):
     print(type(sample))
     print(sample)
     sample.metadata['benchmark_name'] = 'iperf'
+    if FLAGS.gcp_network_tier:
+      sample.metadata['network_tier'] = FLAGS.gcp_network_tier
 
   iperf_benchmark.Cleanup(benchmark_spec)
 
@@ -111,7 +115,8 @@ def Run(benchmark_spec):
     print(type(sample))
     print(sample)
     sample.metadata['benchmark_name'] = 'netperf'
-    #sample['metadata']['benchmark_name'] = 'netperf'
+    if FLAGS.gcp_network_tier:
+      sample.metadata['network_tier'] = FLAGS.gcp_network_tier
 
   results = results + ping_results + iperf_results + netperf_results
 
