@@ -116,3 +116,7 @@ flags.DEFINE_multi_string('gcp_dataproc_property', [],
                           'See https://cloud.google.com/dataproc/docs/concepts/'
                           'configuring-clusters/cluster-properties '
                           'for details.')
+flags.DEFINE_enum(
+    'gcp_network_tier', None, ['PREMIUM', 'STANDARD'], 
+    'GCP network Tier. Can specify PREMIUM or STANDARD tier. '
+    'Not currently available for all regions')
