@@ -76,6 +76,8 @@ def Run(benchmark_spec):
   Returns:
     A list of sample.Sample objects.
   """
+  vms = benchmark_spec.vms
+  results = []
   for sending_vm, receiving_vm in vms, reversed(vms):
     results = results + _RunPing(sending_vm,
                                  receiving_vm,
@@ -105,7 +107,7 @@ def _RunPing(sending_vm, receiving_vm, receiving_ip, ip_type):
   """
   logging.info("IP ADDRESS: %s", receiving_ip)
   print(receiving_vm)
-  
+
   if not sending_vm.IsReachable(receiving_vm) and ip_type == 'internal':
     logging.warn('%s is not reachable from %s', receiving_vm, sending_vm)
     return []
