@@ -83,8 +83,6 @@ def Run(benchmark_spec):
                                  receiving_vm,
                                  receiving_vm.internal_ip,
                                  'internal')
-  vms = benchmark_spec.vms
-  results = []
   if FLAGS.ping_also_run_using_external_ip:
     for sending_vm, receiving_vm in vms, reversed(vms):
       results = results + _RunPing(sending_vm,
