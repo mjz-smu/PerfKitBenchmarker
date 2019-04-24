@@ -88,17 +88,17 @@ def Run(benchmark_spec):
   """
   vms = benchmark_spec.vms
   results = []
+  # for sending_vm, receiving_vm in vms, reversed(vms):
+  #   results = results + _RunNPing(sending_vm,
+  #                                receiving_vm,
+  #                                receiving_vm.internal_ip,
+  #                                'internal')
+  # if FLAGS.nping_also_run_using_external_ip:
   for sending_vm, receiving_vm in vms, reversed(vms):
     results = results + _RunNPing(sending_vm,
                                  receiving_vm,
-                                 receiving_vm.internal_ip,
-                                 'internal')
-  if FLAGS.nping_also_run_using_external_ip:
-    for sending_vm, receiving_vm in vms, reversed(vms):
-      results = results + _RunNPing(sending_vm,
-                                   receiving_vm,
-                                   receiving_vm.ip_address,
-                                   'external')
+                                 receiving_vm.ip_address,
+                                 'external')
   return results
 
 
