@@ -1,0 +1,15 @@
+iperf:
+  vm_groups:
+    vm_1:
+      cloud: GCP
+      vm_spec:
+        GCP: 
+          zone: us-central1-b
+    vm_2:
+      cloud: GCP
+      vm_spec:
+        GCP: 
+          zone: us-east1-b
+flags:
+  iperf_sending_thread_count: 5
+  iperf_runtime_in_seconds: 30
