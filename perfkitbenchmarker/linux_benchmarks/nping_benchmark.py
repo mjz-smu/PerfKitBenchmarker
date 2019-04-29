@@ -44,7 +44,7 @@ nping:
       vm_spec: *default_single_core
 """
 
-METRICS = ('Max Latency', 'Min Latency', 'Avgerage Latency')
+METRICS = ('Max Latency', 'Min Latency', 'Average Latency')
 
 
 def GetConfig(user_config):
