@@ -39,6 +39,39 @@ by the "aerospike_storage_type" and "data_disk_type" flags.
     (default: '90')
     (an integer in the range [0, 100])
 
+### [perfkitbenchmarker.linux_benchmarks.aerospike_certification_tool_benchmark ](../perfkitbenchmarker/linux_benchmarks/aerospike_certification_tool_benchmark.py)
+
+#### Description:
+
+Runs a aerospike certification tool benchmark.
+
+See https://github.com/aerospike/act for more info.
+
+
+#### Flags:
+
+`--[no]act_stop_on_complete`: Stop the benchmark when completing current load.
+    This can be useful deciding maximum sustained load for stress tests.
+    (default: 'true')
+
+### [perfkitbenchmarker.linux_benchmarks.aws_dynamodb_ycsb_benchmark ](../perfkitbenchmarker/linux_benchmarks/aws_dynamodb_ycsb_benchmark.py)
+
+#### Description:
+
+Run YCSB benchmark against AWS DynamoDB.
+
+This benchmark does not provision VMs for the corresponding DynamboDB database.
+The only VM group is client group that sends requests to specifiedDB.
+TODO: add DAX option.
+TODO: add global table option.
+
+
+#### Flags:
+
+`--[no]aws_dynamodb_ycsb_consistentReads`: Consistent reads cost 2x eventual
+    reads. 'false' is default which is eventual
+    (default: 'false')
+
 ### [perfkitbenchmarker.linux_benchmarks.beam_integration_benchmark ](../perfkitbenchmarker/linux_benchmarks/beam_integration_benchmark.py)
 
 #### Description:
@@ -240,8 +273,8 @@ http://docs.datastax.com/en/cassandra/2.1/cassandra/tools/toolsCStress_t.html
     (an integer)
 
 `--num_keys`: Number of keys used in cassandra-stress tool across all loader
-    vms. If unset, this benchmark will use 2000000 * num_cpus on data nodes as
-    the value.
+    vms. If unset, this benchmark will use 2000000 * NumCpusForBenchmark() on
+    data nodes as the value.
     (default: '0')
     (an integer)
 
@@ -287,10 +320,11 @@ Compared to hbase_ycsb, this benchmark:
 
 `--google_bigtable_hbase_jar_url`: URL for the Bigtable-HBase client JAR.
     (default: 'https://oss.sonatype.org/service/local/repositories/releases/cont
-    ent/com/google/cloud/bigtable/bigtable-hbase-1.1/0.9.0/bigtable-
-    hbase-1.1-0.9.0.jar')
+    ent/com/google/cloud/bigtable/bigtable-hbase-1.x-hadoop/1.4.0/bigtable-
+    hbase-1.x-hadoop-1.4.0.jar')
 
-`--google_bigtable_instance_name`: Bigtable instance name.
+`--google_bigtable_instance_name`: Bigtable instance name. If not specified, new
+    instance will be created and deleted on the fly.
 
 `--google_bigtable_zone_name`: Bigtable zone.
     (default: 'us-central1-b')
@@ -335,7 +369,7 @@ Spins up a cloud redis instance, runs YCSB against it, then spins it down.
 
 #### Flags:
 
-`--redis_region`: The region to spin up cloud redis in
+`--redis_region`: The region to spin up cloud redis in.
     (default: 'us-central1')
 
 ### [perfkitbenchmarker.linux_benchmarks.cloud_spanner_ycsb_benchmark ](../perfkitbenchmarker/linux_benchmarks/cloud_spanner_ycsb_benchmark.py)
@@ -495,6 +529,18 @@ More info: http://cloudsuite.ch/webserving/
     (default: '150')
     (integer >= 8)
 
+### [perfkitbenchmarker.linux_benchmarks.cluster_boot_benchmark ](../perfkitbenchmarker/linux_benchmarks/cluster_boot_benchmark.py)
+
+#### Description:
+
+Records the time required to boot a cluster of VMs.
+
+#### Flags:
+
+`--[no]cluster_boot_time_reboot`: Whether to reboot the VMs during the cluster
+    boot benchmark to measure reboot performance.
+    (default: 'false')
+
 ### [perfkitbenchmarker.linux_benchmarks.copy_throughput_benchmark ](../perfkitbenchmarker/linux_benchmarks/copy_throughput_benchmark.py)
 
 #### Description:
@@ -527,16 +573,33 @@ at: http://dacapobench.org/
 
 #### Flags:
 
-`--dacapo_benchmark`: <luindex|lusearch>: Name of specific DaCapo benchmark to
-    execute.
+`--dacapo_benchmark`: <avrora|batik|eclipse|fop|h2|jython|luindex|lusearch|pmd|s
+    unflow|tomcat|tradebeans|tradesoap|xalan>: Name of specific DaCapo benchmark
+    to execute.
     (default: 'luindex')
 
 `--dacapo_jar_filename`: Filename of DaCapo jar file.
-    (default: 'dacapo-9.12-bach.jar')
+    (default: 'dacapo-9.12-MR1-bach.jar')
 
 `--dacapo_num_iters`: Number of iterations to execute.
     (default: '1')
     (an integer)
+
+### [perfkitbenchmarker.linux_benchmarks.dpb_cluster_boot_benchmark ](../perfkitbenchmarker/linux_benchmarks/dpb_cluster_boot_benchmark.py)
+
+#### Description:
+
+The benchmark reports the latency of creating a dpb cluster.
+
+#### Flags:
+
+`--dpb_cluster_boot_fs`: <gs|s3|hdfs>: File System to use in the dpb cluster
+    boot benchmark
+    (default: 'gs')
+
+`--dpb_cluster_boot_fs_type`: <ephemeral|persistent>: File System to use in dpb
+    cluster boot benchmark
+    (default: 'ephemeral')
 
 ### [perfkitbenchmarker.linux_benchmarks.dpb_distcp_benchmark ](../perfkitbenchmarker/linux_benchmarks/dpb_distcp_benchmark.py)
 
@@ -568,6 +631,43 @@ of various cloud providers.
 `--distcp_source_fs`: <gs|s3|hdfs>: File System to use as the source of the
     distcp operation
     (default: 'gs')
+
+### [perfkitbenchmarker.linux_benchmarks.dpb_terasort_benchmark ](../perfkitbenchmarker/linux_benchmarks/dpb_terasort_benchmark.py)
+
+#### Description:
+
+Executes the 3 phases of Teasort phases on a Apache Hadoop MapReduce cluster.
+
+TeraSort is a popular benchmark that measures the amount of time to sort a
+configured amount of randomly distributed data on a given cluster. It is
+commonly used to measure MapReduce performance of an Apache Hadoop cluster.
+The following report compares performance of a YARN-scheduled TeraSort job on
+
+A full TeraSort benchmark run consists of the following three steps:
+
+* Generating the input data via TeraGen.
+* Running the actual TeraSort on the input data.
+* Validating the sorted output data via TeraValidate.
+
+The benchmark reports the detailed latency of executing each phase.
+
+
+#### Flags:
+
+`--dpb_terasort_fs`: <gs|s3|hdfs>: File System to use in the Terasort benchmark
+    (default: 'gs')
+
+`--dpb_terasort_fs_type`: <ephemeral|persistent>: The type of File System to use
+    in the Terasort benchmark
+    (default: 'ephemeral')
+
+`--dpb_terasort_num_records`: Number of 100-byte rows to generate.
+    (default: '10000')
+    (an integer)
+
+`--[no]dpb_terasort_pre_cleanup`: Cleanup the terasort directories on the
+    specified filesystem.
+    (default: 'false')
 
 ### [perfkitbenchmarker.linux_benchmarks.dpb_testdfsio_benchmark ](../perfkitbenchmarker/linux_benchmarks/dpb_testdfsio_benchmark.py)
 
@@ -637,9 +737,7 @@ managed data warehouse solutions such as Redshift and BigQuery.
 
 #### Flags:
 
-`--edw_benchmark_scripts`: Comma separated list of scripts.
-    (default: 'sample.sql')
-    (a comma separated list)
+`--edw_benchmark_script`: Path to the sql script.
 
 ### [perfkitbenchmarker.linux_benchmarks.fio_benchmark ](../perfkitbenchmarker/linux_benchmarks/fio_benchmark.py)
 
@@ -673,6 +771,13 @@ Quick howto: http://www.bluestop.org/fio/HOWTO.txt
 `--[no]fio_hist_log`: Whether to collect clat histogram.
     (default: 'false')
 
+`--fio_io_depths`: IO queue depths to run on. Can specify a single number, like
+    --fio_io_depths=1, a range, like --fio_io_depths=1-4, or a list, like
+    --fio_io_depths=1-4,6-8
+    (default: '1')
+    (A comma-separated list of integers or integer ranges. Ex: -1,3,5:7 is read
+    as -1,3,5,6,7.)
+
 `--[no]fio_iops_log`: Whether to collect an IOPS log of the fio jobs.
     (default: 'false')
 
@@ -695,6 +800,11 @@ Quick howto: http://www.bluestop.org/fio/HOWTO.txt
     (default: '1000')
     (an integer)
 
+`--fio_num_jobs`: Number of concurrent fio jobs to run.
+    (default: '1')
+    (A comma-separated list of integers or integer ranges. Ex: -1,3,5:7 is read
+    as -1,3,5,6,7.)
+
 `--fio_parameters`: Parameters to apply to all PKB generated fio jobs. Each
     member of the list should be of the form "param=value".
     (default: '')
@@ -713,6 +823,33 @@ Quick howto: http://www.bluestop.org/fio/HOWTO.txt
     the full size of the device. If using --fio_generate_scenarios and not
     running against a raw device, you must pass --fio_working_set_size.
     (a non-negative integer)
+
+### [perfkitbenchmarker.linux_benchmarks.glibc_benchmark ](../perfkitbenchmarker/linux_benchmarks/glibc_benchmark.py)
+
+#### Description:
+
+Runs Glibc Microbenchmark.
+
+The glibc microbenchmark suite automatically generates code for specified
+functions, builds and calls them repeatedly for given inputs to give some
+basic performance properties of the function.
+
+Homepage: https://fossies.org/linux/glibc/benchtests/README
+
+Installs glibc (see linux_packages/glibc.py for the version). The benchmark
+needs python 2.7 or later in addition to the dependencies required to build the
+GNU C Library.
+
+
+#### Flags:
+
+`--glibc_benchset`: By default, it will run the whole set of benchmarks. To run
+    only a subset of benchmarks, one may set "glibc_benchset = bench-math bench-
+    pthread" by using the flag on the command line multiple times.;
+    repeat this option to specify a list of values
+    (default: "['bench-math', 'bench-pthread', 'bench-string', 'string-
+    benchset', 'wcsmbs-benchset', 'stdlib-benchset', 'stdio-common-benchset',
+    'math-benchset', 'malloc-thread']")
 
 ### [perfkitbenchmarker.linux_benchmarks.gpu_pcie_bandwidth_benchmark ](../perfkitbenchmarker/linux_benchmarks/gpu_pcie_bandwidth_benchmark.py)
 
@@ -733,6 +870,12 @@ Runs NVIDIA's CUDA PCI-E bandwidth test
     gpu_pcie_bandwidth_transfer_sizes. Additionally, if range is selected, the
     resulting bandwidth will be averaged over all provided transfer sizes.
     (default: 'quick')
+
+`--gpu_pcie_bandwidth_transfer_sizes`: range of transfer sizes to use in bytes.
+    Only used if gpu_pcie_bandwidth_mode is set to range
+    (default: '67108864,1073741824,67108864')
+    (A comma-separated list of integers or integer ranges. Ex: -1,3,5:7 is read
+    as -1,3,5,6,7.)
 
 ### [perfkitbenchmarker.linux_benchmarks.hadoop_terasort_benchmark ](../perfkitbenchmarker/linux_benchmarks/hadoop_terasort_benchmark.py)
 
@@ -819,6 +962,33 @@ HDFS web UI on  50070.
     (default: '1')
     (an integer)
 
+### [perfkitbenchmarker.linux_benchmarks.horovod_benchmark ](../perfkitbenchmarker/linux_benchmarks/horovod_benchmark.py)
+
+#### Description:
+
+Run Horovod distributed Tensorflow Training benchmark.
+
+#### Flags:
+
+`--horovod_batch_size`: Batch size per compute device.
+    (default: '256')
+    (an integer)
+
+`--horovod_deep_learning_examples_commit`: Commit hash of the AWS deep learning
+    samples github repo to use for the benchmark.
+    (default: '599adf2')
+
+`--horovod_model`: <resnet18|resnet34|resnet50|resnet101|resnet152>: name of the
+    model to run.
+    (default: 'resnet50')
+
+`--horovod_num_epochs`: Number of epochs to train for.
+    (default: '1')
+    (an integer)
+
+`--[no]horovod_synthetic`: Whether to use synthetic data.
+    (default: 'true')
+
 ### [perfkitbenchmarker.linux_benchmarks.hpcc_benchmark ](../perfkitbenchmarker/linux_benchmarks/hpcc_benchmark.py)
 
 #### Description:
@@ -834,6 +1004,7 @@ Homepage: http://www.netlib.org/benchmark/hpl/
 
 HPL requires a BLAS library (Basic Linear Algebra Subprograms)
 OpenBlas: http://www.openblas.net/
+Intel MKL: https://software.intel.com/en-us/mkl
 
 HPL also requires a MPI (Message Passing Interface) Library
 OpenMPI: http://www.open-mpi.org/
@@ -853,11 +1024,16 @@ http://www.netlib.org/benchmark/hpl/faqs.html
 `--hpcc_binary`: The path of prebuilt hpcc binary to use. If not provided, this
     benchmark built its own using OpenBLAS.
 
-`--hpcc_mpi_env`: Comma seperated list containing environment variables to use
+`--hpcc_mpi_env`: Comma separated list containing environment variables to use
     with mpirun command. e.g.
     MKL_DEBUG_CPU_TYPE=7,MKL_ENABLE_INSTRUCTIONS=AVX512
     (default: '')
     (a comma separated list)
+
+`--hpcc_timeout_hours`: The number of hours to wait for the HPCC binary to
+    complete before timing out and assuming it failed.
+    (default: '4')
+    (an integer)
 
 `--memory_size_mb`: The amount of memory in MB on each machine to use. By
     default it will use the entire system's memory.
@@ -877,8 +1053,11 @@ Requires openmpi 1.10.2
 `--hpcg_gpus_per_node`: The number of gpus per node.
     (a positive integer)
 
-`--[no]hpcg_run_as_root`: If true, pass --allow-run-as-root to mpirun.
-    (default: 'false')
+`--hpcg_problem_size`: three dimensional problem size for each node. Must
+    contain three integers
+    (default: '256,256,256')
+    (A comma-separated list of integers or integer ranges. Ex: -1,3,5:7 is read
+    as -1,3,5,6,7.)
 
 `--hpcg_runtime`: hpcg runtime in seconds
     (default: '60')
@@ -898,15 +1077,13 @@ except that this can target TPU.
 
 #### Flags:
 
-`--inception3_data_dir`: Directory where input data is stored
-    (default: 'gs://cloud-tpu-test-datasets/fake_imagenet')
+`--inception3_epochs_per_eval`: Number of training epochs to run between
+    evaluations.
+    (default: '2')
+    (an integer)
 
 `--inception3_eval_batch_size`: Global (not per-shard) batch size for evaluation
     (default: '1024')
-    (an integer)
-
-`--inception3_iterations`: Number of iterations per TPU training loop.
-    (default: '100')
     (an integer)
 
 `--inception3_learning_rate`: Learning rate.
@@ -915,9 +1092,7 @@ except that this can target TPU.
 
 `--inception3_mode`: <train|eval|train_and_eval>: Mode to run: train, eval,
     train_and_eval
-    (default: 'train')
-
-`--inception3_model_dir`: Directory where model output is stored
+    (default: 'train_and_eval')
 
 `--inception3_save_checkpoints_secs`: Interval (in seconds) at which the model
     data should be checkpointed. Set to 0 to disable.
@@ -928,19 +1103,52 @@ except that this can target TPU.
     (default: '1024')
     (an integer)
 
-`--inception3_train_steps`: Number of steps use for training.
-    (default: '250000')
-    (an integer)
-
-`--inception3_train_steps_per_eval`: Number of training steps to run between
-    evaluations.
-    (default: '2000')
-    (an integer)
+`--inception3_train_epochs`: Number of epochs use for training.
+    (default: '200')
+    (a positive integer)
 
 `--inception3_use_data`: <real|fake>: Whether to use real or fake data. If real,
-    the data is downloaded from inception3_data_dir. Otherwise, synthetic data
-    is generated.
+    the data is downloaded from imagenet_data_dir. Otherwise, synthetic data is
+    generated.
     (default: 'real')
+
+### [perfkitbenchmarker.linux_benchmarks.ior_benchmark ](../perfkitbenchmarker/linux_benchmarks/ior_benchmark.py)
+
+#### Description:
+
+Runs IOR and mdtest benchmarks.
+
+IOR is a tool used for distributed testing of filesystem performance.
+mdtest is used for distributed testing of filesystem metadata performance.
+
+See https://github.com/hpc/ior for more info.
+
+
+#### Flags:
+
+`--ior_num_procs`: The number of MPI processes to use for IOR.
+    (default: '256')
+    (an integer)
+
+`--ior_script`: The IOR script to run. See
+    https://github.com/hpc/ior/blob/master/doc/sphinx/userDoc/skripts.rst for
+    more info.
+    (default: 'default_ior_script')
+
+`--mdtest_args`: Command line arguments to be passed to mdtest. Each set of args
+    in the list will be run separately.
+    (default: '-n 1000 -u')
+    (a comma separated list)
+
+`--[no]mdtest_drop_caches`: Whether to drop caches between the
+    create/stat/delete phases. If this is set, mdtest will be run 3 times with
+    the -C, -T, and -r options and the client page caches will be dropped
+    between runs.
+    (default: 'true')
+
+`--mdtest_num_procs`: The number of MPI processes to use for mdtest.
+    (default: '32')
+    (an integer)
 
 ### [perfkitbenchmarker.linux_benchmarks.iperf_benchmark ](../perfkitbenchmarker/linux_benchmarks/iperf_benchmark.py)
 
@@ -967,33 +1175,6 @@ Runs Iperf to collect network throughput.
 
 `--iperf_timeout`: Number of seconds to wait in addition to iperf runtime before
     killing iperf client command.
-    (a positive integer)
-
-### [perfkitbenchmarker.linux_benchmarks.iperf_vpn_benchmark ](../perfkitbenchmarker/linux_benchmarks/iperf_vpn_benchmark.py)
-
-#### Description:
-
-Runs plain Iperf over vpn.
-
-Docs:
-http://iperf.fr/
-
-Runs Iperf to collect network throughput.
-
-
-#### Flags:
-
-`--iperf_vpn_runtime_in_seconds`: Number of seconds to run iperf.
-    (default: '60')
-    (a positive integer)
-
-`--iperf_vpn_sending_thread_count`: Number of connections to make to the server
-    for sending traffic.
-    (default: '1')
-    (a positive integer)
-
-`--iperf_vpn_timeout`: Number of seconds to wait in addition to iperf runtime
-    before killing iperf client command.
     (a positive integer)
 
 ### [perfkitbenchmarker.linux_benchmarks.jdbc_ycsb_benchmark ](../perfkitbenchmarker/linux_benchmarks/jdbc_ycsb_benchmark.py)
@@ -1032,6 +1213,53 @@ Tested against Azure SQL database.
 `--jdbc_ycsb_fetch_size`: The JDBC fetch size hinted to driver
     (default: '10')
     (an integer)
+
+### [perfkitbenchmarker.linux_benchmarks.lmbench_benchmark ](../perfkitbenchmarker/linux_benchmarks/lmbench_benchmark.py)
+
+#### Description:
+
+Run LMbench.
+
+Suite of simple, portable benchmarks. Compares different systems performance.
+Homepage: http://www.bitmover.com/lmbench/index.html
+
+
+#### Flags:
+
+`--lmbench_hardware`: <YES|NO>: The decision to run BENCHMARK_HARDWARE tests:
+    YES or NO. The default is NO
+    (default: 'NO')
+
+`--lmbench_mem_size`: The range of memory on which several benchmarks operate.
+    If not provided, the memory size should be 8MB as default
+    (an integer)
+
+### [perfkitbenchmarker.linux_benchmarks.memcached_memtier_benchmark ](../perfkitbenchmarker/linux_benchmarks/memcached_memtier_benchmark.py)
+
+#### Description:
+
+Runs memtier benchmark against memcached on cloud virtual machines.
+
+Memcached is an in-memory key-value store for small chunks of arbitrary
+data (strings, objects) from results of database calls, API calls, or page
+rendering.
+Memcached homepage: https://memcached.org/
+
+Memtier_benchmark is a load generator created by RedisLabs to benchmark
+NoSQL key-value databases.
+
+Memtier_benchmark homepage: https://github.com/RedisLabs/memtier_benchmark
+Memtier_benchmark usage:
+https://redislabs.com/blog/memtier_benchmark-a-high-throughput-benchmarking-tool-for-redis-memcached/
+
+
+#### Flags:
+
+`--memcached_memtier_client_machine_type`: Machine type to use for the memtier
+    client if different from memcached server machine type.
+
+`--memcached_memtier_server_machine_type`: Machine type to use for the memtier
+    server if different from memcached client machine type.
 
 ### [perfkitbenchmarker.linux_benchmarks.memcached_ycsb_benchmark ](../perfkitbenchmarker/linux_benchmarks/memcached_ycsb_benchmark.py)
 
@@ -1092,6 +1320,17 @@ and average latency inside mesh network.
     (default: '1')
     (an integer)
 
+### [perfkitbenchmarker.linux_benchmarks.mlperf_benchmark ](../perfkitbenchmarker/linux_benchmarks/mlperf_benchmark.py)
+
+#### Description:
+
+Run MLPerf benchmarks.
+
+#### Flags:
+
+`--mlperf_benchmark`: <resnet>: MLPerf benchmark test to run.
+    (default: 'resnet')
+
 ### [perfkitbenchmarker.linux_benchmarks.mnist_benchmark ](../perfkitbenchmarker/linux_benchmarks/mnist_benchmark.py)
 
 #### Description:
@@ -1100,14 +1339,49 @@ Run MNIST benchmarks.
 
 #### Flags:
 
-`--mnist_model_dir`: Estimator model directory
+`--imagenet_data_dir`: Directory where the input data is stored
+    (default: 'gs://cloud-tpu-test-datasets/fake_imagenet')
 
-`--mnist_train_file`: mnist train file for tensorflow
-    (default: 'gs://tfrc-test-bucket/mnist-records/train.tfrecords')
-
-`--mnist_train_steps`: Total number of training steps
-    (default: '2000')
+`--imagenet_num_eval_images`: Size of ImageNet validation data set.
+    (default: '50000')
     (an integer)
+
+`--imagenet_num_train_images`: Size of ImageNet training data set.
+    (default: '1281167')
+    (an integer)
+
+`--mnist_batch_size`: Mini-batch size for the training. Note that this is the
+    global batch size and not the per-shard batch.
+    (default: '1024')
+    (an integer)
+
+`--mnist_data_dir`: mnist train file for tensorflow
+
+`--mnist_eval_epochs`: Total number of evaluation epochs. If `0`, evaluation
+    after training is skipped.
+    (default: '1')
+    (an integer)
+
+`--mnist_num_eval_images`: Size of MNIST validation data set.
+    (default: '5000')
+    (an integer)
+
+`--mnist_num_train_images`: Size of MNIST training data set.
+    (default: '55000')
+    (an integer)
+
+`--mnist_train_epochs`: Total number of training echos
+    (default: '37')
+    (a positive integer)
+
+`--t2t_data_dir`: Directory where the input data is stored for tensor2tensor
+
+`--tpu_iterations`: Number of iterations per TPU training loop.
+    (default: '500')
+    (an integer)
+
+`--tpu_precision`: <bfloat16|float32>: Precision to use
+    (default: 'bfloat16')
 
 ### [perfkitbenchmarker.linux_benchmarks.mongodb_ycsb_benchmark ](../perfkitbenchmarker/linux_benchmarks/mongodb_ycsb_benchmark.py)
 
@@ -1212,6 +1486,12 @@ multichase codebase: https://github.com/google/multichase
     available to multichase. The value of this flag contains the options to
     provide to taskset. Examples: '0x00001FE5' or '-c 0,2,5-12'.
 
+`--multichase_thread_count`: Number of threads (one per core), to use when
+    executing multichase. Passed to multichase via its -t flag.
+    (default: '1')
+    (A comma-separated list of integers or integer ranges. Ex: -1,3,5:7 is read
+    as -1,3,5,6,7.)
+
 ### [perfkitbenchmarker.linux_benchmarks.mxnet_benchmark ](../perfkitbenchmarker/linux_benchmarks/mxnet_benchmark.py)
 
 #### Description:
@@ -1280,6 +1560,12 @@ machines.
     interval estimation. If unset, a single iteration will be run.
     (an integer in the range [3, 30])
 
+`--netperf_num_streams`: Number of netperf processes to run. Netperf will run
+    once for each value in the list.
+    (default: '1')
+    (A comma-separated list of integers or integer ranges. Ex: -1,3,5:7 is read
+    as -1,3,5,6,7.)
+
 `--netperf_test_length`: netperf test length, in seconds
     (default: '60')
     (a positive integer)
@@ -1297,6 +1583,31 @@ machines.
     time in the thinktime array.
     (default: '0')
     (an integer)
+
+### [perfkitbenchmarker.linux_benchmarks.nginx_benchmark ](../perfkitbenchmarker/linux_benchmarks/nginx_benchmark.py)
+
+#### Description:
+
+Runs HTTP load generators against an Nginx server.
+
+#### Flags:
+
+`--nginx_conf`: The path to an Nginx config file that should be applied to the
+    server instead of the default one.
+
+`--nginx_content_size`: The size of the content Nginx will serve in bytes.
+    (default: '10000')
+    (an integer)
+
+`--nginx_load_configs`: For each load spec in the list, wrk2 will be run once
+    against Nginx with those parameters. The format is
+    "target_request_rate:duration:threads:connections", with each value being
+    per client (so running with 2 clients would double the target rate, threads,
+    and connections (but not duration since they are run concurrently)). The
+    target request rate is measured in requests per second and the duration is
+    measured in seconds.
+    (default: '100:60:1:1')
+    (a comma separated list)
 
 ### [perfkitbenchmarker.linux_benchmarks.object_storage_service_benchmark ](../perfkitbenchmarker/linux_benchmarks/object_storage_service_benchmark.py)
 
@@ -1417,6 +1728,10 @@ category:
 `--object_storage_worker_output`: If set, the worker threads' output will be
     written to thepath provided.
 
+`--[no]record_individual_latency_samples`: If set, record the latency of each
+    download and upload in its own sample.
+    (default: 'false')
+
 `--storage`: <GCP|AWS|Azure|OpenStack>: storage provider
     (GCP/AZURE/AWS/OPENSTACK) to use.
     (default: 'GCP')
@@ -1495,6 +1810,11 @@ Pgbench benchmark for PostgreSQL databases.
 
 #### Flags:
 
+`--pgbench_client_counts`: array of client counts passed to pgbench
+    (default: '1')
+    (A comma-separated list of integers or integer ranges. Ex: -1,3,5:7 is read
+    as -1,3,5,6,7.)
+
 `--pgbench_scale_factor`: scale factor used to fill the database
     (default: '1')
     (a positive integer)
@@ -1565,6 +1885,61 @@ Redis homepage: http://redis.io/
 `--redis_ycsb_processes`: Number of total ycsb processes across all clients.
     (default: '1')
     (an integer)
+
+### [perfkitbenchmarker.linux_benchmarks.resnet_benchmark ](../perfkitbenchmarker/linux_benchmarks/resnet_benchmark.py)
+
+#### Description:
+
+Run ResNet benchmarks.
+
+Tutorials: https://cloud.google.com/tpu/docs/tutorials/resnet
+Code: https://github.com/tensorflow/tpu/tree/master/models/official/resnet
+This benchmark is equivalent to tensorflow_benchmark with the resnet model
+except that this can target TPU.
+
+
+#### Flags:
+
+`--resnet_data_format`: <channels_first|channels_last>: A flag to override the
+    data format used in the model. The value is either channels_first or
+    channels_last. To run the network on CPU or TPU, channels_last should be
+    used. For GPU, channels_first will improve performance.
+    (default: 'channels_last')
+
+`--resnet_depth`: <18|34|50|101|152|200>: Depth of ResNet model to use. Deeper
+    models require more training time and more memory and may require reducing
+    --resnet_train_batch_size to prevent running out of memory.
+    (default: '50')
+
+`--resnet_epochs_per_eval`: Controls how often evaluation is performed. Since
+    evaluation is fairly expensive, it is advised to evaluate as infrequently as
+    possible (i.e. up to --train_steps, which evaluates the model only after
+    finishing the entire training regime).
+    (default: '2')
+    (integer >= 2)
+
+`--resnet_eval_batch_size`: Global (not per-shard) batch size for evaluation
+    (default: '1024')
+    (an integer)
+
+`--resnet_mode`: <train|eval|train_and_eval>: Mode to run: train, eval,
+    train_and_eval
+    (default: 'train_and_eval')
+
+`--[no]resnet_skip_host_call`: Skip the host_call which is executed every
+    training step. This is generally used for generating training summaries
+    (train loss, learning rate, etc...). When --skip_host_call=false, there
+    could be a performance drop if host_call function is slow and cannot keep up
+    with the TPU-side computation.
+    (default: 'false')
+
+`--resnet_train_batch_size`: Global (not per-shard) batch size for training
+    (default: '1024')
+    (an integer)
+
+`--resnet_train_epochs`: The Number of epochs to use for training.
+    (default: '90')
+    (a positive integer)
 
 ### [perfkitbenchmarker.linux_benchmarks.silo_benchmark ](../perfkitbenchmarker/linux_benchmarks/silo_benchmark.py)
 
@@ -1663,60 +2038,44 @@ SPEC CPU2006 homepage: http://www.spec.org/cpu2006/
     CPU2006 benchmarks to run.
     (default: 'int')
 
-`--runspec_build_tool_version`: Version of gcc/g++/gfortran. This should match
-    runspec_config. Note, if neither runspec_config and
-    runspec_build_tool_version is set, the test install gcc/g++/gfortran-4.7,
-    since that matches default config version. If runspec_config is set, but not
-    runspec_build_tool_version, default version of build tools will be
-    installed. Also this flag only works with debian.
-
-`--runspec_config`: Used by the PKB speccpu2006 benchmark. Name of the cfg file
-    to use as the SPEC CPU2006 config file provided to the runspec binary via
-    its --config flag. If the benchmark is run using the cpu2006-1.2.iso file,
-    then the cfg file must be placed in the local PKB data directory and will be
-    copied to the remote machine prior to executing runspec. See README.md for
-    instructions if running with a repackaged cpu2006v1.2.tgz file.
-    (default: 'linux64-x64-gcc47.cfg')
-
-`--runspec_define`: Used by the PKB speccpu2006 benchmark. Optional comma-
-    separated list of SYMBOL[=VALUE] preprocessor macros provided to the runspec
-    binary via repeated --define flags. Example: numa,smt,sse=SSE4.2
-    (default: '')
-
-`--[no]runspec_enable_32bit`: Used by the PKB speccpu2006 benchmark. If set,
-    multilib packages will be installed on the remote machine to enable use of
-    32-bit SPEC CPU2006 binaries. This may be useful when running on memory-
-    constrained instance types (i.e. less than 2 GiB memory/core), where 64-bit
-    execution may be problematic.
-    (default: 'false')
-
-`--[no]runspec_estimate_spec`: Used by the PKB speccpu2006 benchmark. If set,
-    the benchmark will report an estimated aggregate score even if SPEC CPU2006
-    did not compute one. This usually occurs when --runspec_iterations is less
-    than 3.  --runspec_keep_partial_results is also required to be set. Samples
-    will becreated as estimated_SPECint(R)_rate_base2006 and
-    estimated_SPECfp(R)_rate_base2006.  Available results will be saved, and PKB
-    samples will be marked with a metadata value of partial=true. If unset,
-    SPECint(R)_rate_base2006 and SPECfp(R)_rate_base2006 are listed in the
-    metadata under missing_results.
-    (default: 'false')
-
-`--runspec_iterations`: Used by the PKB speccpu2006 benchmark. The number of
-    benchmark iterations to execute, provided to the runspec binary via its
-    --iterations flag.
-    (default: '3')
-    (an integer)
-
-`--[no]runspec_keep_partial_results`: Used by the PKB speccpu2006 benchmark. If
-    set, the benchmark will report an aggregate score even if some of the SPEC
-    CPU2006 component tests failed with status "NR". Available results will be
-    saved, and PKB samples will be marked with a metadata value of partial=true.
-    If unset, partial failures are treated as errors.
-    (default: 'false')
-
 `--runspec_metric`: <rate|speed>: SPEC test to run. Speed is time-based metric,
     rate is throughput-based metric.
     (default: 'rate')
+
+### [perfkitbenchmarker.linux_benchmarks.speccpu2017_benchmark ](../perfkitbenchmarker/linux_benchmarks/speccpu2017_benchmark.py)
+
+#### Description:
+
+Runs SPEC CPU2017.
+
+From the SPEC CPU2017 documentation:
+The SPEC CPU 2017 benchmark package contains SPEC's next-generation,
+industry-standardized, CPU intensive suites for measuring and comparing
+compute intensive performance, stressing a system's processor,
+memory subsystem and compiler.
+
+SPEC CPU2017 homepage: http://www.spec.org/cpu2017/
+
+
+#### Flags:
+
+`--spec17_copies`: Number of copies to run for rate tests. If not set default to
+    number of cpu cores using lscpu.
+    (an integer)
+
+`--[no]spec17_fdo`: Run with feedback directed optimization on peak. Default to
+    False.
+    (default: 'false')
+
+`--spec17_subset`: Specify which speccpu2017 tests to run. Accepts a list of
+    benchmark suites (intspeed, fpspeed, intrate, fprate) or individual
+    benchmark names. Defaults to all suites.
+    (default: 'intspeed,fpspeed,intrate,fprate')
+    (a comma separated list)
+
+`--spec17_threads`: Number of threads to run for speed tests. If not set default
+    to number of cpu threads using lscpu.
+    (an integer)
 
 ### [perfkitbenchmarker.linux_benchmarks.specsfs2014_benchmark ](../perfkitbenchmarker/linux_benchmarks/specsfs2014_benchmark.py)
 
@@ -1737,9 +2096,14 @@ against a filesystem can run against Gluster.
 
 #### Flags:
 
-`--specsfs2014_benchmark`: <VDI|DATABASE|SWBUILD|VDA>: The SPEC SFS 2014
-    benchmark to run.
-    (default: 'VDI')
+`--[no]specsfs2014_auto_mode`: If True, automatically find the max passing score
+    for each benchmark. This ignores other flags such as specsfs2014_load,
+    specsfs2014_incr_load, and specsfs2014_num_runs.
+    (default: 'false')
+
+`--specsfs2014_benchmarks`: The SPEC SFS 2014 benchmarks to run.
+    (default: 'VDI,DATABASE,SWBUILD,VDA')
+    (a comma separated list)
 
 `--specsfs2014_config`: This flag can be used to specify an alternate SPEC
     config file to use. If this option is specified, none of the other benchmark
@@ -1749,6 +2113,13 @@ against a filesystem can run against Gluster.
 `--specsfs2014_incr_load`: The amount to increment "load" by for each run.
     (default: '1')
     (a positive integer)
+
+`--specsfs2014_load`: The starting load in units of SPEC "business metrics". The
+    meaning of business metric varies depending on the SPEC benchmark (e.g. VDI
+    has load measured in virtual desktops).
+    (default: '1')
+    (A comma-separated list of integers or integer ranges. Ex: -1,3,5:7 is read
+    as -1,3,5,6,7.)
 
 `--specsfs2014_num_runs`: The total number of SPEC runs. The load for the nth
     run is "load" + n * "specsfs_incr_load".
@@ -1766,6 +2137,44 @@ Runs the Stencil2D benchmark from the SHOC Benchmark Suite
 `--stencil2d_iterations`: number of iterations to run
     (default: '5')
     (a positive integer)
+
+`--stencil2d_problem_sizes`: problem sizes to run. Can specify a single number,
+    like --stencil2d_problem_sizes=4096 or a list like
+    --stencil2d_problem_sizes=1024,4096
+    (default: '4096')
+    (A comma-separated list of integers or integer ranges. Ex: -1,3,5:7 is read
+    as -1,3,5,6,7.)
+
+### [perfkitbenchmarker.linux_benchmarks.stress_ng_benchmark ](../perfkitbenchmarker/linux_benchmarks/stress_ng_benchmark.py)
+
+#### Description:
+
+Runs stress-ng.
+
+From the stress-ng ubuntu documentation:
+stress-ng will stress test a computer system in various selectable ways.
+It was designed to exercise various physical subsystems of a computer as
+well as the various operating system kernel interfaces. stress-ng also has
+a wide range of CPU specific stress tests that exercise floating point,
+integer, bit manipulation and control flow.
+
+stress-ng manpage:
+http://manpages.ubuntu.com/manpages/xenial/man1/stress-ng.1.html
+
+
+#### Flags:
+
+`--[no]stress_ng_calc_geomean`: Whether to calculate geomean or not.
+    (default: 'true')
+
+`--stress_ng_custom_stressors`: List of stressors to run against. Default
+    combines cpu,cpu-cache, and memory suites
+    (default: '')
+    (a comma separated list)
+
+`--stress_ng_duration`: Number of seconds to run the test.
+    (default: '10')
+    (an integer)
 
 ### [perfkitbenchmarker.linux_benchmarks.sysbench_benchmark ](../perfkitbenchmarker/linux_benchmarks/sysbench_benchmark.py)
 
@@ -1809,6 +2218,21 @@ to install it. This will allow this benchmark to properly create an instance.
     (default: '100')
     (an integer)
 
+`--sysbench_post_failover_seconds`: When non Zero, will run the benchmark an
+    additional amount of time after failover is complete.  Useful for detecting
+    if there are any differences in TPS becauseof failover.
+    (default: '0')
+    (an integer)
+
+`--sysbench_pre_failover_seconds`: If non zero, then after the sysbench workload
+    is complete, a failover test will be performed.  When a failover test is
+    run, the database will be driven using the last entry in
+    sysbench_thread_counts.  After sysbench_pre_failover_seconds, a failover
+    will be triggered.  Time will be measured until sysbench is able to connect
+    again.
+    (default: '0')
+    (an integer)
+
 `--sysbench_report_interval`: The interval, in seconds, we ask sysbench to
     report results.
     (default: '2')
@@ -1816,7 +2240,11 @@ to install it. This will allow this benchmark to properly create an instance.
 
 `--sysbench_run_seconds`: The duration of the actual run in which results are
     collected, in seconds.
-    (default: '480')
+    (default: '10')
+    (an integer)
+
+`--sysbench_scale`: Scale parameter as used by TPCC benchmark.
+    (default: '100')
     (an integer)
 
 `--sysbench_table_size`: The number of rows of each table used in the oltp tests
@@ -1830,9 +2258,42 @@ to install it. This will allow this benchmark to properly create an instance.
 `--sysbench_testname`: The built in oltp lua script to run
     (default: 'oltp_read_write')
 
+`--sysbench_thread_counts`: array of thread counts passed to sysbench, one at a
+    time
+    (default: '64')
+    (A comma-separated list of integers or integer ranges. Ex: -1,3,5:7 is read
+    as -1,3,5,6,7.)
+
 `--sysbench_warmup_seconds`: The duration of the warmup run in which results are
     discarded, in seconds.
-    (default: '120')
+    (default: '10')
+    (an integer)
+
+### [perfkitbenchmarker.linux_benchmarks.t2t_benchmark ](../perfkitbenchmarker/linux_benchmarks/t2t_benchmark.py)
+
+#### Description:
+
+Run a Tensor2Tensor benchmark.
+
+Code:
+https://github.com/tensorflow/tensor2tensor
+This benchmark can run any tensor2tensor model, including ones that target TPU's
+
+
+#### Flags:
+
+`--t2t_eval_steps`: Number of eval steps
+    (default: '1')
+    (an integer)
+
+`--t2t_hparams_set`: Tensor2Tensor hyperparameters set
+
+`--t2t_model`: Tensor2Tensor model to run
+
+`--t2t_problem`: Tensor2Tensor problem to run
+
+`--t2t_train_steps`: Number of train steps
+    (default: '1000')
     (an integer)
 
 ### [perfkitbenchmarker.linux_benchmarks.tensorflow_benchmark ](../perfkitbenchmarker/linux_benchmarks/tensorflow_benchmark.py)
@@ -1865,9 +2326,15 @@ needs a variable, it accesses it from the parameter server directly.
     and no 'num_gpus' flag in the tf_benchmarks_args flag, the num_gpus flag
     will automatically be populated with the number of available GPUs.
 
+`--tf_data_dir`: Path to dataset in TFRecord format (aka Example protobufs). If
+    not specified, synthetic data will be used.
+
 `--tf_data_format`: <NCHW|NHWC>: Data layout to
     use: NHWC (TF native) or NCHW (cuDNN native).
     (default: 'NCHW')
+
+`--tf_data_module`: Data path in preprovisioned data bucket.
+    (default: 'tensorflow/ILSVRC2012')
 
 `--tf_data_name`: <imagenet|flowers>: Name of dataset: imagenet or flowers.
     (default: 'imagenet')
@@ -1899,9 +2366,21 @@ needs a variable, it accesses it from the parameter server directly.
     (default: 'inception3,vgg16,alexnet,resnet50,resnet152')
     (a comma separated list)
 
+`--tf_num_files_train`: The number of files for training
+    (default: '1024')
+    (an integer)
+
+`--tf_num_files_val`: The number of files for validation
+    (default: '128')
+    (an integer)
+
 `--tf_precision`: <float16|float32>: Use 16-bit floats for certain tensors
     instead of 32-bit floats. This is currently experimental.
     (default: 'float32')
+
+`--[no]tf_use_local_data`: Whether to use data from local machine. If true, the
+    benchmark will use data from cloud storage (GCS, S3, etc).
+    (default: 'false')
 
 `--tf_variable_update`:
     <parameter_server|replicated|distributed_replicated|independent>: The method
@@ -1923,17 +2402,15 @@ This benchmark is composed of the following:
     and their labels
 
 The benchmark uses two VMs: a server, and a client.
-Tensorflow Serving is built from source, which takes
+Tensorflow Serving is built from source (in a docker image), which takes
 a significant amount of time (45 minutes on an n1-standard-8).
-Note that both client and server VMs build the code.
+Note that both client and server VMs build the code. This is necessary to build
+an optimized binary for the CPU it will be running on.
 
-Once the code is built, the server prepares an inception model
-for serving. It prepares a pre-trained inception model using a publicly
-available checkpoint file. This model has been trained to ~75% accuracy
-on the imagenet 2012 dataset, so is relatively useless; however, measuring
-the accuracy of the model is beyond the scope of this benchmark.
-The server then starts the standard tensorflow_model_server binary using
-the prepared model.
+Once the code is built, the server prepares an ResNet model
+for serving. It prepares a pre-trained ResNet model using a publicly
+available SavedModel. The server then starts a platform-optimized
+tensorflow_model_server binary using the prepared model.
 
 The client VM downloads the imagenet 2012 validation images from cloud storage
 and begins running a client-side load generator script which does the
@@ -1949,6 +2426,11 @@ When the benchmark is finished, all resources are torn down.
 
 
 #### Flags:
+
+`--tf_serving_client_thread_counts`: number of client worker threads
+    (default: '16,32')
+    (A comma-separated list of integers or integer ranges. Ex: -1,3,5:7 is read
+    as -1,3,5,6,7.)
 
 `--tf_serving_runtime`: benchmark runtime in seconds
     (default: '60')

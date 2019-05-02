@@ -25,6 +25,11 @@ Module containing flags applicable across benchmark run on GCP.
 `--gce_network_name`: The name of an already created network to use instead of
     creating a new one.
 
+`--gce_network_tier`: <premium|standard>: Network tier to use for all GCE VMs.
+    Note that standard networking is only available in certain regions. See
+    https://cloud.google.com/network-tiers/docs/overview
+    (default: 'premium')
+
 `--gce_num_local_ssds`: The number of ssds that should be added to the VM. Note
     that this is currently only supported in certain zones (see
     https://cloud.google.com/compute/docs/local-ssd).
@@ -47,13 +52,27 @@ Module containing flags applicable across benchmark run on GCP.
 `--gce_subnet_region`: Region to create subnet in instead of automatically
     creating one in every region.
 
+`--gce_tags`: List of --tags when creating a VM
+    (a comma separated list)
+
 `--gcloud_path`: The path for the gcloud utility.
     (default: 'gcloud')
 
 `--gcloud_scopes`: If set, space-separated list of scopes to apply to every
     created machine
 
-`--gcp_host_type`: The host type of all sole tenant hosts that get created.
+`--gcp_dataproc_image`: Specifies the custom image URI or the custom image name
+    that will be used to create a cluster.
+
+`--gcp_dataproc_property`: Specifies configuration properties for installed
+    packages, such as Hadoop and Spark. Properties are mapped to configuration
+    files by specifying a prefix, such as "core:io.serializations". See
+    https://cloud.google.com/dataproc/docs/concepts/configuring-clusters
+    /cluster-properties for details.;
+    repeat this option to specify a list of values
+    (default: '[]')
+
+`--gcp_dataproc_subnet`: Specifies the subnet that the cluster will be part of.
 
 `--gcp_instance_metadata`: A colon separated key-value pair that will be added
     to the "--metadata" flag of the gcloud cli (with the colon replaced by the
@@ -73,10 +92,16 @@ Module containing flags applicable across benchmark run on GCP.
     repeat this option to specify a list of values
     (default: '[]')
 
+`--[no]gcp_internal_ip`: Use internal ips for ssh or scp commands. gcloud
+    betacomponents must be installed to use this flag.
+    (default: 'false')
+
 `--gcp_min_cpu_platform`:
     <none|sandybridge|ivybridge|haswell|broadwell|skylake>: When specified, the
     VM will have either the specified architecture or a newer one. Architecture
     availability is zone dependent.
+
+`--gcp_node_type`: The node type of all sole tenant hosts that get created.
 
 `--gcp_num_vms_per_host`: The number of VMs per dedicated host. If None, VMs
     will be packed on a single host until no more can be packed at which point a
@@ -89,6 +114,14 @@ Module containing flags applicable across benchmark run on GCP.
 `--gcp_redis_gb`: Size of redis cluster in gb
     (default: '5')
     (an integer)
+
+`--gcp_service_account`: Service account to use for authorization.
+
+`--gcp_service_account_key_file`: Local path to file that contains a private
+    authorization key, used to activate gcloud.
+
+`--[no]gke_enable_alpha`: Whether to enable alpha kubernetes clusters.
+    (default: 'false')
 
 `--image_family`: The family of the image that the boot disk will be initialized
     with. The --image flag will take priority over this flag. See:
@@ -161,7 +194,7 @@ Instances can be created and deleted.
 
 #### Description:
 
-Interface to Google Cloud Storage.
+Contains classes/functions related to Google Cloud Storage.
 
 #### Flags:
 
