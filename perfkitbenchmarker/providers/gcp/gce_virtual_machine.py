@@ -461,8 +461,6 @@ class GceVirtualMachine(virtual_machine.BaseVirtualMachine):
     if self.preemptible:
       cmd.flags['preemptible'] = True
 
-    if FLAGS.gcp_network_tier:
-      cmd.flags['network-tier'] = FLAGS.gcp_network_tier
     return cmd
 
   def _Create(self):
