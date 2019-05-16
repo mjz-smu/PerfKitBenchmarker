@@ -18,9 +18,14 @@ All VM specifics are self-contained and the class provides methods to
 operate on the VM: boot, shutdown, etc.
 """
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import abc
 import os.path
 import threading
+import time
 
 import jinja2
 
@@ -37,9 +42,11 @@ from perfkitbenchmarker import resource
 from perfkitbenchmarker import vm_util
 from perfkitbenchmarker.configs import option_decoders
 from perfkitbenchmarker.configs import spec
+import six
 
 FLAGS = flags.FLAGS
 DEFAULT_USERNAME = 'perfkit'
+QUOTA_EXCEEDED_MESSAGE = 'Creation failed due to quota exceeded: '
 
 _VM_SPEC_REGISTRY = {}
 _VM_REGISTRY = {}
@@ -59,6 +66,12 @@ flags.DEFINE_integer(
 flags.DEFINE_list('vm_metadata', [], 'Metadata to add to the vm '
                   'via the provider\'s AddMetadata function. It expects'
                   'key:value pairs')
+flags.DEFINE_bool(
+    'skip_firewall_rules', False,
+    'If set, this run will not create firewall rules. This is useful if the '
+    'user project already has all of the firewall rules in place and/or '
+    'creating new ones is expensive')
+
 # Note: If adding a gpu type here, be sure to add it to
 # the flag definition in pkb.py too.
 VALID_GPU_TYPES = ['k80', 'p100', 'v100', 'p4', 'p4-vws']
@@ -275,6 +288,7 @@ class BaseVirtualMachine(resource.BaseResource):
     self.tcp_congestion_control = None
     self.numa_node_count = None
     self.num_disable_cpus = None
+    self.capacity_reservation_id = None
 
   def __repr__(self):
     return '<BaseVirtualMachine [ip={0}, internal_ip={1}]>'.format(
@@ -315,15 +329,13 @@ class BaseVirtualMachine(resource.BaseResource):
     return self.scratch_disks[disk_num].mount_point
 
   def AllowIcmp(self):
-    """Opens the ICMP protocol on the firewall corresponding to the VM if
-    one exists.
-    """
-    if self.firewall:
+    """Opens ICMP protocol on the firewall corresponding to the VM if exists."""
+    if self.firewall and not FLAGS.skip_firewall_rules:
       self.firewall.AllowIcmp(self)
 
   def AllowPort(self, start_port, end_port=None):
     """Opens the port on the firewall corresponding to the VM if one exists."""
-    if self.firewall:
+    if self.firewall and not FLAGS.skip_firewall_rules:
       self.firewall.AllowPort(self, start_port, end_port)
 
   def AllowRemoteAccessPorts(self):
@@ -352,6 +364,8 @@ class BaseVirtualMachine(resource.BaseResource):
     Returns:
       dict mapping string property key to value.
     """
+    if not self.created:
+      return {}
     result = self.metadata.copy()
     result.update({
         'image': self.image,
@@ -368,7 +382,7 @@ class BaseVirtualMachine(resource.BaseResource):
       result['numa_node_count'] = self.numa_node_count
     if self.num_disable_cpus is not None:
       result['num_disable_cpus'] = self.num_disable_cpus
-    # Hack: Silently fail if we have no num_cpus attribute.
+    # Hack: Silently fail if we have no num_cpus or OS_TYPE attribute.
     # This property is defined in BaseOsMixin and should always
     # be available during regular PKB usage because virtual machines
     # always have a mixin. However, in testing virtual machine objects
@@ -376,7 +390,10 @@ class BaseVirtualMachine(resource.BaseResource):
     # failing because the attribute didn't exist.
     if getattr(self, 'num_cpus', None):
       result['num_cpus'] = self.num_cpus
-
+      if self.NumCpusForBenchmark() != self.num_cpus:
+        result['num_benchmark_cpus'] = self.NumCpusForBenchmark()
+    if getattr(self, 'OS_TYPE', None):
+      result['os_type'] = self.OS_TYPE
     return result
 
   def SimulateMaintenanceEvent(self):
@@ -565,8 +582,12 @@ class BaseVirtualMachine(resource.BaseResource):
     """
     return None
 
+  def _PreDelete(self):
+    """See base class."""
+    self.LogVmDebugInfo()
 
-class BaseOsMixin(object):
+
+class BaseOsMixin(six.with_metaclass(abc.ABCMeta, object)):
   """The base class for OS Mixin classes.
 
   This class holds VM methods and attributes relating to the VM's guest OS.
@@ -579,8 +600,6 @@ class BaseOsMixin(object):
     remote_access_ports: A list of ports which must be opened on the firewall
         in order to access the VM.
   """
-
-  __metaclass__ = abc.ABCMeta
   OS_TYPE = None
   BASE_OS_TYPE = None
 
@@ -631,7 +650,7 @@ class BaseOsMixin(object):
       ignore_failure: Ignore any failure if set to true.
       suppress_warning: Suppress the result logging from IssueCommand when the
           return code is non-zero.
-      timeout is the time to wait in seconds for the command before exiting.
+      timeout: The time to wait in seconds for the command before exiting.
           None means no timeout.
 
     Returns:
@@ -653,8 +672,12 @@ class BaseOsMixin(object):
       raise
 
   def Reboot(self):
-    """Reboot the VM."""
+    """Reboots the VM.
 
+    Returns:
+      The duration in seconds from the time the reboot command was issued to
+      the time we could SSH into the VM and verify that the timestamp changed.
+    """
     vm_bootable_time = None
 
     # Use self.bootable_time to determine if this is the first boot.
@@ -664,6 +687,7 @@ class BaseOsMixin(object):
     if self.bootable_time is not None:
       vm_bootable_time = self.VMLastBootTime()
 
+    before_reboot_timestamp = time.time()
     self._Reboot()
 
     while True:
@@ -672,8 +696,9 @@ class BaseOsMixin(object):
       # this is sufficient check for the first boot - but not for a reboot
       if vm_bootable_time != self.VMLastBootTime():
         break
-
+    reboot_duration_sec = time.time() - before_reboot_timestamp
     self._AfterReboot()
+    return reboot_duration_sec
 
   @abc.abstractmethod
   def _Reboot(self):
@@ -712,7 +737,7 @@ class BaseOsMixin(object):
 
   @abc.abstractmethod
   def VMLastBootTime(self):
-    """Returns the UTC time the VM was last rebooted as reported by the VM.
+    """Returns the time the VM was last rebooted as reported by the VM.
     """
     raise NotImplementedError()
 
@@ -765,6 +790,10 @@ class BaseOsMixin(object):
     """Perform OS specific setup on any local disks that exist."""
     pass
 
+  def LogVmDebugInfo(self):
+    """Logs OS-specific debug info. Must be overridden on an OS mixin."""
+    pass
+
   def PushFile(self, source_path, remote_path=''):
     """Copies a file or a directory to the VM.
 
@@ -786,18 +815,25 @@ class BaseOsMixin(object):
     """
     self.RemoteCopy(local_path, remote_path, copy_to=False)
 
-  def PushDataFile(self, data_file, remote_path=''):
+  def PushDataFile(self, data_file, remote_path='', should_double_copy=None):
     """Upload a file in perfkitbenchmarker.data directory to the VM.
 
     Args:
       data_file: The filename of the file to upload.
       remote_path: The destination for 'data_file' on the VM. If not specified,
         the file will be placed in the user's home directory.
+      should_double_copy: Indicates whether to first copy to the home directory
     Raises:
       perfkitbenchmarker.data.ResourceNotFound: if 'data_file' does not exist.
     """
     file_path = data.ResourcePath(data_file)
-    self.PushFile(file_path, remote_path)
+    if should_double_copy:
+      home_file_path = '~/' + data_file
+      self.PushFile(file_path, home_file_path)
+      copy_cmd = (' '.join(['cp', home_file_path, remote_path]))
+      self.RemoteCommand(copy_cmd)
+    else:
+      self.PushFile(file_path, remote_path)
 
   def RenderTemplate(self, template_path, remote_path, context):
     """Renders a local Jinja2 template and copies it to the remote host.
@@ -855,11 +891,24 @@ class BaseOsMixin(object):
       The number of CPUs on the VM.
     """
     if self._num_cpus is None:
-      if FLAGS.num_cpus_override:
-        self._num_cpus = FLAGS.num_cpus_override
-      else:
-        self._num_cpus = self._GetNumCpus()
+      self._num_cpus = self._GetNumCpus()
     return self._num_cpus
+
+  def NumCpusForBenchmark(self):
+    """Gets the number of CPUs for benchmark configuration purposes.
+
+    Many benchmarks scale their configurations based off of the number of CPUs
+    available on the system (e.g. determine the number of threads). Benchmarks
+    should use this property rather than num_cpus so that users can override
+    that behavior with the --num_cpus_override flag. Not all benchmarks may
+    use this, and they may use more than this number of CPUs. To actually
+    ensure that they are not being used during benchmarking, the CPUs should be
+    disabled.
+
+    Returns:
+      The number of CPUs for benchmark configuration purposes.
+    """
+    return FLAGS.num_cpus_override or self.num_cpus
 
   @abc.abstractmethod
   def _GetNumCpus(self):

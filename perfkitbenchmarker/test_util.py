@@ -13,6 +13,10 @@
 # limitations under the License.
 """Functions and classes to make testing easier."""
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import os
 import mock
 
@@ -20,6 +24,8 @@ from perfkitbenchmarker import benchmark_spec
 from perfkitbenchmarker import flags
 from perfkitbenchmarker import sample
 from perfkitbenchmarker.configs import benchmark_config_spec
+import six
+from six.moves import range
 
 
 _BENCHMARK_NAME = 'test_benchmark'
@@ -45,9 +51,8 @@ class SamplesTestMixin(object):
                      msg or 'Samples %s and %s have different values' % (a, b))
     self.assertEqual(a.unit, b.unit,
                      msg or 'Samples %s and %s have different units' % (a, b))
-    self.assertEqual(a.metadata, b.metadata,
-                     msg or 'Samples %s and %s have different metadata' %
-                     (a, b))
+    self.assertDictEqual(a.metadata, b.metadata, msg or
+                         'Samples %s and %s have different metadata' % (a, b))
     # Deliberately don't compare the timestamp fields of the samples.
 
   def assertSampleListsEqualUpToTimestamp(self, a, b, msg=None):
@@ -61,7 +66,7 @@ class SamplesTestMixin(object):
 
     self.assertEqual(len(a), len(b),
                      msg or 'Lists %s and %s are not the same length' % (a, b))
-    for i in xrange(len(a)):
+    for i in range(len(a)):
       self.assertIsInstance(a[i], sample.Sample,
                             msg or ('%s (item %s in list) is '
                                     'not a sample.Sample object' %
@@ -73,7 +78,7 @@ class SamplesTestMixin(object):
       try:
         self.assertSamplesEqualUpToTimestamp(a[i], b[i], msg=msg)
       except self.failureException as ex:
-        ex.message = ex.message + (' (was item %s in list)' % i)
+        ex.message = str(ex) + (' (was item %s in list)' % i)
         ex.args = (ex.message,)
         raise ex
 
@@ -101,7 +106,7 @@ def assertDiskMounts(benchmark_config, mount_point):
   """
 
   assert len(benchmark_config['vm_groups']) == 1
-  vm_group = benchmark_config['vm_groups'].itervalues().next()
+  vm_group = next(six.itervalues(benchmark_config['vm_groups']))
   assert vm_group.get('num_vms', 1) == 1
   m = mock.MagicMock()
   m.BENCHMARK_NAME = _BENCHMARK_NAME

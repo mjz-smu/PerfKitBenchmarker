@@ -31,9 +31,9 @@ import datetime
 import posixpath
 
 from perfkitbenchmarker import flags
-from perfkitbenchmarker.linux_packages import hadoop
 from perfkitbenchmarker import resource
 from perfkitbenchmarker import vm_util
+from perfkitbenchmarker.linux_packages import hadoop
 
 flags.DEFINE_string('spark_static_cluster_id', None,
                     'If set, the name of the Spark cluster, assumed to be '
@@ -52,6 +52,7 @@ RUNTIME = 'running_time'
 WAITING = 'pending_time'
 
 SPARK_JOB_TYPE = 'spark'
+PYSPARK_JOB_TYPE = 'pyspark'
 HADOOP_JOB_TYPE = 'hadoop'
 
 SPARK_VM_GROUPS = ('master_group', 'worker_group')
@@ -99,7 +100,9 @@ class BaseSparkService(resource.BaseResource):
     self.zone = spark_service_spec.master_group.vm_spec.zone
 
   @abc.abstractmethod
-  def SubmitJob(self, job_jar, class_name, job_poll_interval=None,
+  def SubmitJob(self, job_jar, class_name,
+                job_script=None,
+                job_poll_interval=None,
                 job_stdout_file=None, job_arguments=None,
                 job_type=SPARK_JOB_TYPE):
     """Submit a job to the spark service.
@@ -109,6 +112,7 @@ class BaseSparkService(resource.BaseResource):
     Args:
       job_jar: Jar file to execute.
       class_name: Name of the main class.
+      job_script: PySpark script to run. job_jar and class_name must be None.
       job_poll_interval: integer saying how often to poll for job
         completion.  Not used by providers for which submit job is a
         synchronous operation.
@@ -126,11 +130,34 @@ class BaseSparkService(resource.BaseResource):
     """
     pass
 
+  @abc.abstractmethod
+  def ExecuteOnMaster(self, script_path, script_args):
+    """Execute a script on the master node.
+
+    Args:
+      script_path: local path of the script to execute.
+      script_args: arguments to pass to the script.
+    """
+    pass
+
+  @abc.abstractmethod
+  def CopyFromMaster(self, remote_path, local_path):
+    """Copy a file from the master node.
+
+    Args:
+      remote_path: path of the file to copy.
+      local_path: destination to copy to.
+    """
+    pass
+
   def GetMetadata(self):
     """Return a dictionary of the metadata for this cluster."""
-    basic_data = {'spark_service': self.SERVICE_NAME,
-                  'spark_svc_cloud': self.CLOUD,
-                  'spark_cluster_id': self.cluster_id}
+    basic_data = {
+        'spark_service': self.SERVICE_NAME,
+        'spark_svc_cloud': self.CLOUD,
+        'spark_cluster_id': self.cluster_id,
+        'spark_cluster_zone': getattr(self, 'zone', None) or 'unknown'
+    }
     # TODO grab this information for user_managed clusters.
     if not self.user_managed:
       basic_data.update({'num_workers': str(self.spec.worker_group.vm_count),
@@ -146,7 +173,6 @@ class BaseSparkService(resource.BaseResource):
       return cls.HADOOP_SAMPLE_LOCATION
     else:
       raise NotImplemented()
-
 
 
 class PkbSparkService(BaseSparkService):
@@ -177,7 +203,6 @@ class PkbSparkService(BaseSparkService):
     self.leader = self.vms['master_group'][0]
     hadoop.ConfigureAndStart(self.leader,
                              self.vms['worker_group'])
-
 
   def _Delete(self):
     pass
@@ -213,3 +238,9 @@ class PkbSparkService(BaseSparkService):
           'hadoop-mapreduce-examples-{0}.jar'.format(FLAGS.hadoop_version))
     else:
       raise NotImplemented()
+
+  def ExecuteOnMaster(self, script_path, script_args):
+    pass
+
+  def CopyFromMaster(self, remote_path, local_path):
+    pass

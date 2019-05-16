@@ -25,9 +25,14 @@ All VM specifics are self-contained and the class provides methods to
 operate on the VM: boot, shutdown, etc.
 """
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import itertools
 import json
 import posixpath
+import re
 
 from perfkitbenchmarker import custom_virtual_machine_spec
 from perfkitbenchmarker import disk
@@ -43,10 +48,18 @@ from perfkitbenchmarker.configs import option_decoders
 from perfkitbenchmarker.providers import azure
 from perfkitbenchmarker.providers.azure import azure_disk
 from perfkitbenchmarker.providers.azure import azure_network
+from perfkitbenchmarker.providers.azure import util
 
+import six
+from six.moves import range
 import yaml
 
 FLAGS = flags.FLAGS
+NUM_LOCAL_VOLUMES = {
+    'Standard_L8s_v2': 1, 'Standard_L16s_v2': 2,
+    'Standard_L32s_v2': 4, 'Standard_L64s_v2': 8,
+    'Standard_L80s_v2': 10
+}
 
 
 class AzureVmSpec(virtual_machine.BaseVmSpec):
@@ -222,10 +235,10 @@ class AzureVirtualMachineMetaClass(resource.AutoRegisterResourceMeta):
           '{0} did not override IMAGE_URN'.format(self.__name__))
 
 
-class AzureVirtualMachine(virtual_machine.BaseVirtualMachine):
+class AzureVirtualMachine(
+    six.with_metaclass(AzureVirtualMachineMetaClass,
+                       virtual_machine.BaseVirtualMachine)):
   """Object representing an Azure Virtual Machine."""
-
-  __metaclass__ = AzureVirtualMachineMetaClass
   CLOUD = providers.AZURE
   # Subclasses should override IMAGE_URN.
   IMAGE_URN = None
@@ -239,7 +252,7 @@ class AzureVirtualMachine(virtual_machine.BaseVirtualMachine):
     super(AzureVirtualMachine, self).__init__(vm_spec)
     self.network = azure_network.AzureNetwork.GetNetwork(self)
     self.firewall = azure_network.AzureFirewall.GetFirewall()
-    self.max_local_disks = 1
+    self.max_local_disks = NUM_LOCAL_VOLUMES.get(self.machine_type) or 1
     self._lun_counter = itertools.count()
     self._deleted = False
 
@@ -284,7 +297,13 @@ class AzureVirtualMachine(virtual_machine.BaseVirtualMachine):
 
     # Uses a custom default because create for larger sizes sometimes times out.
     azure_vm_create_timeout = 600
-    vm_util.IssueCommand(create_cmd, timeout=azure_vm_create_timeout)
+    _, stderr, retcode = vm_util.IssueCommand(create_cmd,
+                                              timeout=azure_vm_create_timeout)
+    if retcode and 'Error Code: QuotaExceeded' in stderr:
+      raise errors.Benchmarks.QuotaFailure(
+          virtual_machine.QUOTA_EXCEEDED_MESSAGE + stderr)
+    if retcode and 'AllocationFailed' in stderr:
+      raise errors.Benchmarks.InsufficientCapacityCloudFailure(stderr)
 
   def _Exists(self):
     """Returns True if the VM exists."""
@@ -315,11 +334,15 @@ class AzureVirtualMachine(virtual_machine.BaseVirtualMachine):
     response = json.loads(stdout)
     self.os_disk.name = response['storageProfile']['osDisk']['name']
     self.os_disk.created = True
+    vm_util.IssueCommand([
+        azure.AZURE_PATH, 'disk', 'update', '--name', self.os_disk.name,
+        '--set', util.GetTagsJson(self.resource_group.timeout_minutes)
+    ] + self.resource_group.args)
     self.internal_ip = self.nic.GetInternalIP()
     self.ip_address = self.public_ip.GetIPAddress()
 
   def AddMetadata(self, **tags):
-    tag_list = ['tags.%s=%s' % (k, v) for k, v in tags.iteritems()]
+    tag_list = ['tags.%s=%s' % (k, v) for k, v in six.iteritems(tags)]
     vm_util.IssueRetryableCommand(
         [azure.AZURE_PATH, 'vm', 'update',
          '--name', self.name] + self.resource_group.args +
@@ -330,15 +353,21 @@ class AzureVirtualMachine(virtual_machine.BaseVirtualMachine):
 
     Args:
       disk_spec: virtual_machine.BaseDiskSpec object of the disk.
+
+    Raises:
+      CreationError: If an SMB disk is listed but the SMB service not created.
     """
     disks = []
 
-    for _ in xrange(disk_spec.num_striped_disks):
+    for _ in range(disk_spec.num_striped_disks):
+      if disk_spec.disk_type == disk.SMB:
+        data_disk = self._GetSmbService().CreateSmbDisk()
+        disks.append(data_disk)
+        continue
       if disk_spec.disk_type == disk.LOCAL:
         # Local disk numbers start at 1 (0 is the system disk).
         disk_number = self.local_disk_counter + 1
         self.local_disk_counter += 1
-        lun = None
         if self.local_disk_counter > self.max_local_disks:
           raise errors.Error('Not enough local disks.')
       else:
@@ -346,7 +375,7 @@ class AzureVirtualMachine(virtual_machine.BaseVirtualMachine):
         # and local disks occupy [1, max_local_disks]).
         disk_number = self.remote_disk_counter + 1 + self.max_local_disks
         self.remote_disk_counter += 1
-        lun = next(self._lun_counter)
+      lun = next(self._lun_counter)
       data_disk = azure_disk.AzureDisk(disk_spec, self.name, self.machine_type,
                                        self.storage_account, lun)
       data_disk.disk_number = disk_number
@@ -437,6 +466,10 @@ class WindowsAzureVirtualMachine(AzureVirtualMachine,
 
   def __init__(self, vm_spec):
     super(WindowsAzureVirtualMachine, self).__init__(vm_spec)
+    # The names of Windows VMs on Azure are limited to 15 characters so let's
+    # drop the pkb prefix if necessary.
+    if len(self.name) > 15:
+      self.name = re.sub('^pkb-', '', self.name)
     self.user_name = self.name
     self.password = vm_util.GenerateRandomWindowsPassword()
 
