@@ -666,27 +666,33 @@ class AwsGlobalAccelerator(resource.BaseResource):
     logging.info(self.ip_addresses)
     #util.AddDefaultTags(self.id, self.region)
 
-  @vm_util.Retry()
+  #@vm_util.Retry()
   def _Delete(self):
     """Deletes the Accelerator."""
-    #TODO delete listeners
+    
+    # need to disable accelerator before it can be deleted
     self._Update(enabled=False)
     status = self.Describe()
-    logging.info(status['Accelerator']['Enabled'])
-    logging.info(type(status['Accelerator']['Enabled']))
     while status['Accelerator']['Enabled'] == True:
       status = self.Describe()
     
-    #TODO add delete listener
+    # need to delete listeners before accelerator can be deleted
     for listener in self.listeners:
       listener._Delete()
-  
+
     delete_cmd = util.AWS_PREFIX + [
         'globalaccelerator',
         'delete-accelerator',
         '--region', self.region,
         '--accelerator-arn', self.accelerator_arn]
-    vm_util.IssueRetryableCommand(delete_cmd)
+    stdout, stderr, _ = vm_util.IssueCommand(delete_cmd)
+
+    exists = self._Exists()
+    while exists:
+      vm_util.IssueCommand(delete_cmd)
+      if "AcceleratorNotFoundException" in stderr:
+        break
+      exists = self._Exists()
 
   #@vm_util.Retry()
   def _Update(self,enabled):
@@ -712,10 +718,15 @@ class AwsGlobalAccelerator(resource.BaseResource):
         'describe-accelerator',
         '--region', self.region,
         '--accelerator-arn', self.accelerator_arn]
-    stdout, _ = util.IssueRetryableCommand(describe_cmd)
-    response = json.loads(stdout)
-    accelerator = response['Accelerator']
-    return len(accelerator) > 0
+    stdout, _, _ = vm_util.IssueCommand(describe_cmd)
+    try:
+      response = json.loads(stdout)
+      accelerator = response['Accelerator']
+      return len(accelerator) > 0
+    except ValueError as e:
+        return False
+
+
 
   def Describe(self):
     """Returns true if the accelerator exists."""
@@ -930,12 +941,12 @@ class AwsEndpointGroup(resource.BaseResource):
     #util.AddDefaultTags(self.id, self.region)
 
   def _Delete(self):
-    """Deletes the internet gateway."""
+    """Deletes the endpoint group."""
     delete_cmd = util.AWS_PREFIX + [
         'globalaccelerator',
-        'create-endpoint-group',
+        'delete-endpoint-group',
         '--region', self.region,
-        '--endpoint-group-arn' % self.endpoint_group_arn]
+        '--endpoint-group-arn', self.endpoint_group_arn]
     vm_util.IssueCommand(delete_cmd)
 
   def _Exists(self):
@@ -944,11 +955,10 @@ class AwsEndpointGroup(resource.BaseResource):
         'globalaccelerator',
         'describe-endpoint-group',
         '--region', self.region,
-        '--endpoint-group-arn' % self.region]
+        '--endpoint-group-arn', self.endpoint_group_arn]
     stdout, _ = util.IssueRetryableCommand(describe_cmd)
     response = json.loads(stdout)
-    internet_gateways = response['InternetGateways']
-    assert len(internet_gateways) < 2, 'Too many internet gateways.'
+    internet_gateways = response['EndpointGroup']
     return len(internet_gateways) > 0
 
 
