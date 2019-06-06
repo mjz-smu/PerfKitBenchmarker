@@ -574,6 +574,20 @@ class AwsVirtualMachine(virtual_machine.BaseVirtualMachine):
     instance = response['Reservations'][0]['Instances'][0]
     self.ip_address = instance['PublicIpAddress']
     self.internal_ip = instance['PrivateIpAddress']
+
+    if FLAGS.aws_global_accelerator:
+      #TODO associate elastic IP here
+      logging.warn("adding global acclerator stuff here")
+      self.network.elastic_ip.AssociateAddress(self.id)
+      self.ip_address = self.network.elastic_ip.public_ip
+      logging.warning(self.network.global_accelerator.Status())
+      status = self.network.global_accelerator.Status()
+      while(status == 'In Progress'):
+        status = self.network.global_accelerator.Status()
+        logging.warning(status)
+
+      self.ip_address = self.network.global_accelerator.ip_addresses[0]
+
     if util.IsRegion(self.zone):
       self.zone = str(instance['Placement']['AvailabilityZone'])
     util.AddDefaultTags(self.id, self.region)

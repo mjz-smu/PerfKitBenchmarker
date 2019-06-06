@@ -26,6 +26,7 @@ import logging
 import threading
 import uuid
 import random
+import string
 
 from perfkitbenchmarker import context
 from perfkitbenchmarker import errors
@@ -560,19 +561,14 @@ class AwsNetwork(network.BaseNetwork):
     self.global_accelerator = None
 
     if FLAGS.aws_global_accelerator:
-      #TODO do more stuff
       logging.warn("using aws global accelerator")
-      #TODO create elastic IP
-      #TODO create Accelerator
-      #TODO create Listener
-        # maybe one for TCP
-        # and one for UDP
-      #TODO create endpoint group
-
+      self.elastic_ip = AwsElasticIP(self.region)
+      self.global_accelerator = AwsGlobalAccelerator()
 
   def Create(self):
     """Creates the network."""
     logging.warn("CREATING NETWORK")
+    logging.warn(FLAGS.run_uri)
     self.regional_network.Create()
 
     if self.subnet is None:
@@ -582,8 +578,20 @@ class AwsNetwork(network.BaseNetwork):
       self.subnet.Create()
     self.placement_group.Create()
 
+    if FLAGS.aws_global_accelerator:
+      logging.warn("using aws global accelerator")
+      self.elastic_ip._Create()
+      self.global_accelerator._Create()
+      self.global_accelerator.AddListener('TCP', '10', '60000')
+      self.global_accelerator.listeners[-1].AddEndpointGroup(self.region, self.elastic_ip.allocation_id, 128)
+      
+
   def Delete(self):
     """Deletes the network."""
+
+    if FLAGS.aws_global_accelerator:
+      self.global_accelerator._Delete()
+      self.elastic_ip._Delete()
     if self.subnet:
       self.subnet.Delete()
     self.placement_group.Delete()
@@ -627,9 +635,10 @@ class AwsGlobalAccelerator(resource.BaseResource):
     #must contain only alphanumeric characters or hyphens (-), 
     #and must not begin or end with a hyphen.
     self.name = None
-    self.vpc_id = None
-    self.id = None
     self.accelerator_arn = None
+    self.enabled = False
+    self.ip_addresses = []
+    self.listeners = []
 
 # aws globalaccelerator create-accelerator 
 #         --name ExampleAccelerator
@@ -639,26 +648,32 @@ class AwsGlobalAccelerator(resource.BaseResource):
   def _Create(self):
     """Creates the internet gateway."""
     if not self.idempotency_token:
-      self.idempotency_token = ''.join(
-        random.choice(string.ascii_lowercase + 
-                      string.ascii_uppercase +  
-                      string.digits) for i in range(50))
+      self.idempotency_token = str(uuid.uuid4())[-50:]
 
+    self.name = 'pkb-ga-%s-%s' % (FLAGS.run_uri, str(uuid.uuid4())[-12:])
+            
     create_cmd = util.AWS_PREFIX + [
         'globalaccelerator',
         'create-accelerator',
+        '--name', self.name,
         '--region', self.region,
-        '-idempotencytoken', self.idempotency_token]
+        '--idempotency-token', self.idempotency_token]
     stdout, _, _ = vm_util.IssueCommand(create_cmd)
     response = json.loads(stdout)
-    self.id = response['InternetGateway']['InternetGatewayId']
-    util.AddDefaultTags(self.id, self.region)
+    self.accelerator_arn = response['Accelerator']['AcceleratorArn']
+    self.ip_addresses = response['Accelerator']['IpSets'][0]['IpAddresses']
+    logging.info("ACCELERATOR IP ADDRESSES")
+    logging.info(self.ip_addresses)
+    #util.AddDefaultTags(self.id, self.region)
 
   def _Delete(self):
-    """Deletes the internet gateway."""
+    """Deletes the Accelerator."""
+    #TODO delete listeners
+    self._Update(enabled=False)
     delete_cmd = util.AWS_PREFIX + [
         'globalaccelerator',
         'delete-accelerator',
+        '--region', self.region,
         '--accelerator-arn', self.accelerator_arn]
     vm_util.IssueCommand(delete_cmd)
 
@@ -667,24 +682,58 @@ class AwsGlobalAccelerator(resource.BaseResource):
     update_cmd = util.AWS_PREFIX + [
         'globalaccelerator',
         'update-accelerator',
-        '--accelerator-arn', self.accelerator_arn,
-        '--filter=Name=internet-gateway-id,Values=%s' % self.id]
+        '--region', self.region,
+        '--accelerator-arn', self.accelerator_arn]
     stdout, _ = util.IssueRetryableCommand(update_cmd)
     response = json.loads(stdout)
     accelerator = response['Accelerator']
     assert accelerator['Enabled'] == enabled, 'Accelerator not updated'
 
   def _Exists(self):
-    """Returns true if the internet gateway exists."""
+    """Returns true if the accelerator exists."""
     describe_cmd = util.AWS_PREFIX + [
         'globalaccelerator',
         'describe-accelerator',
-        '--accelerator-arn', self.accelerator_arn,
-        '--region', self.region]
+        '--region', self.region,
+        '--accelerator-arn', self.accelerator_arn]
     stdout, _ = util.IssueRetryableCommand(describe_cmd)
     response = json.loads(stdout)
     accelerator = response['Accelerator']
     return len(accelerator) > 0
+
+  def Status(self):
+    """Returns true if the accelerator exists."""
+    describe_cmd = util.AWS_PREFIX + [
+        'globalaccelerator',
+        'describe-accelerator',
+        '--region', self.region,
+        '--accelerator-arn', self.accelerator_arn]
+    stdout, _ = util.IssueRetryableCommand(describe_cmd)
+    response = json.loads(stdout)
+    status = response['Accelerator']['Status']
+    return status
+
+  #  @vm_util.Retry(poll_interval=1, log_errors=False,
+  #                retryable_exceptions=(AwsTransitionalVmRetryableError,))
+  def isUp(self):
+    """Returns true if the accelerator exists."""
+    describe_cmd = util.AWS_PREFIX + [
+        'globalaccelerator',
+        'describe-accelerator',
+        '--region', self.region,
+        '--accelerator-arn', self.accelerator_arn]
+    stdout, _ = util.IssueRetryableCommand(describe_cmd)
+    response = json.loads(stdout)
+    status = response['Accelerator']['Status']
+    return status
+
+  def AddListener(self, protocol, start_port, end_port):
+    """Returns true if the accelerator exists."""   
+    self.listeners.append(AwsGlobalAcceleratorListener(self,
+                                                       protocol,
+                                                       start_port,
+                                                       end_port))
+    self.listeners[-1]._Create()
 
 
 class AwsGlobalAcceleratorListener(resource.BaseResource):
@@ -692,7 +741,7 @@ class AwsGlobalAcceleratorListener(resource.BaseResource):
 
   def __init__(self, accelerator, protocol, start_port, end_port):
     super(AwsGlobalAcceleratorListener, self).__init__()
-    self.accelerator_arn = accelerator.arn
+    self.accelerator_arn = accelerator.accelerator_arn
     #self.target_group_arn = target_group.arn
     self.start_port = start_port
     self.end_port = end_port
@@ -700,6 +749,7 @@ class AwsGlobalAcceleratorListener(resource.BaseResource):
     self.region = accelerator.region
     self.idempotency_token = None
     self.arn = None
+    self.endpoint_groups = []
 
 # aws globalaccelerator create-listener 
 #        --accelerator-arn arn:aws:globalaccelerator::012345678901:accelerator/1234abcd-abcd-1234-abcd-1234abcdefgh 
@@ -710,10 +760,7 @@ class AwsGlobalAcceleratorListener(resource.BaseResource):
 
   def _Create(self):
     if not self.idempotency_token:
-      self.idempotency_token = ''.join(
-        random.choice(string.ascii_lowercase + 
-                      string.ascii_uppercase +  
-                      string.digits) for i in range(50))
+      self.idempotency_token = str(uuid.uuid4())[-50:]
     """Create the listener."""
     create_cmd = util.AWS_PREFIX + [
         'globalaccelerator',
@@ -723,9 +770,13 @@ class AwsGlobalAcceleratorListener(resource.BaseResource):
         '--protocol', self.protocol,
         '--port-ranges', 
         'FromPort=%s,ToPort=%s' % (str(self.start_port), str(self.end_port)),
-        '--idempotencytoken', self.idempotency_token
+        '--idempotency-token', self.idempotency_token
     ]
-    vm_util.IssueCommand(create_cmd)
+    stdout, _, _ = vm_util.IssueCommand(create_cmd)
+    response = json.loads(stdout)
+    self.listener_arn = response['Listener']['ListenerArn']
+    logging.info("LISTENER ARN")
+    logging.info(self.listener_arn)
 
 # RESPONSE
 # {
@@ -742,12 +793,32 @@ class AwsGlobalAcceleratorListener(resource.BaseResource):
 #    }
 # }
 
+  def _Exists(self):
+    """Returns true if the accelerator exists."""
+    describe_cmd = util.AWS_PREFIX + [
+        'globalaccelerator',
+        'describe-listener',
+        '--region', self.region,
+        '--listener-arn', self.listener_arn]
+    stdout, _ = util.IssueRetryableCommand(describe_cmd)
+    response = json.loads(stdout)
+    accelerator = response['Listener']
+    return len(accelerator) > 0
+
   def _Delete(self):
-    """Listeners will be deleted along with their associated Accelerator."""
-    pass
+    """Deletes Listeners"""
+    delete_cmd = util.AWS_PREFIX + [
+        'globalaccelerator',
+        'delete-listener',
+        '--region', self.region,
+        '--listener-arn', self.listener_arn]
+    vm_util.IssueCommand(delete_cmd)
 
+  def AddEndpointGroup(self, region, endpoint, weight):
+    """Add end point group to listener."""   
+    self.endpoint_groups.append(AwsEndpointGroup(self, region))
 
-
+    self.endpoint_groups[-1]._Create(endpoint, weight)
 
 class AwsEndpointGroup(resource.BaseResource):
   """An object representing an Aws Global Accelerator.
@@ -779,9 +850,10 @@ class AwsEndpointGroup(resource.BaseResource):
     # all global accelerators must be located in us-west-2
     self.region = 'us-west-2'
     self.idempotency_token = None
-    self.listener_arn =  listener.arn
+    self.listener_arn = listener.listener_arn
     self.endpoint_group_region = endpoint_group_region
     self.endpoint_group_arn = None
+    self.endpoints = []
 
 # aws globalaccelerator create-endpoint-group 
 #            --listener-arn arn:aws:globalaccelerator::012345678901:accelerator/1234abcd-abcd-1234-abcd-1234abcdefgh/listener/0123vxyz 
@@ -790,7 +862,28 @@ class AwsEndpointGroup(resource.BaseResource):
 #            --region us-west-2
 #            --idempotencytoken dcba4321-dcba-4321-dcba-dcba4321
 
-  def _Create(self):
+  def _Create(self, endpoint, weight=128):
+    """Creates the internet gateway."""
+    if not self.idempotency_token:
+      self.idempotency_token = str(uuid.uuid4())[-50:]
+
+    create_cmd = util.AWS_PREFIX + [
+        'globalaccelerator',
+        'create-endpoint-group',
+        '--listener-arn', self.listener_arn,
+        '--endpoint-group-region', self.endpoint_group_region,
+        '--region', self.region,
+        '--idempotency-token', self.idempotency_token,
+        '--endpoint-configurations',
+        'EndpointId=%s,Weight=%s' % (endpoint, str(weight))]
+    stdout, _, _ = vm_util.IssueCommand(create_cmd)
+    response = json.loads(stdout)
+    self.endpoint_group_arn = response['EndpointGroup']['EndpointGroupArn']
+    self.endpoints.append(endpoint)
+    #util.AddDefaultTags(self.id, self.region)
+    return
+
+  def _Update(self, endpoint, weight=128):
     """Creates the internet gateway."""
     if not self.idempotency_token:
       self.idempotency_token = ''.join(
@@ -800,20 +893,19 @@ class AwsEndpointGroup(resource.BaseResource):
 
     create_cmd = util.AWS_PREFIX + [
         'globalaccelerator',
-        'create-endpoint-group',
-        '--endpoint-group-region', self.endpoint_group_region,
+        'update-endpoint-group',
         '--region', self.region,
-        '--idempotencytoken', self.idempotency_token]
-    stdout, _, _ = vm_util.IssueCommand(create_cmd)
-    response = json.loads(stdout)
-    self.endpoint_group_arn = response['EndpointGroup']['EndpointGroupArn']
-    util.AddDefaultTags(self.id, self.region)
+        '--endpoint-configurations',
+        'EndpointId=%s,Weight=%s' % (endpoint, str(weight))]
+    vm_util.IssueCommand(create_cmd)
+    #util.AddDefaultTags(self.id, self.region)
 
   def _Delete(self):
     """Deletes the internet gateway."""
     delete_cmd = util.AWS_PREFIX + [
         'globalaccelerator',
         'create-endpoint-group',
+        '--region', self.region,
         '--endpoint-group-arn' % self.endpoint_group_arn]
     vm_util.IssueCommand(delete_cmd)
 
@@ -822,6 +914,7 @@ class AwsEndpointGroup(resource.BaseResource):
     describe_cmd = util.AWS_PREFIX + [
         'globalaccelerator',
         'describe-endpoint-group',
+        '--region', self.region,
         '--endpoint-group-arn' % self.region]
     stdout, _ = util.IssueRetryableCommand(describe_cmd)
     response = json.loads(stdout)
@@ -829,42 +922,17 @@ class AwsEndpointGroup(resource.BaseResource):
     assert len(internet_gateways) < 2, 'Too many internet gateways.'
     return len(internet_gateways) > 0
 
-  def Attach(self, vpc_id):
-    """Attaches the internetgateway to the VPC."""
-    if not self.attached:
-      self.vpc_id = vpc_id
-      attach_cmd = util.AWS_PREFIX + [
-          'ec2',
-          'attach-internet-gateway',
-          '--region=%s' % self.region,
-          '--internet-gateway-id=%s' % self.id,
-          '--vpc-id=%s' % self.vpc_id]
-      util.IssueRetryableCommand(attach_cmd)
-      self.attached = True
-
-  def Detach(self):
-    """Detaches the internetgateway from the VPC."""
-    if self.attached:
-      detach_cmd = util.AWS_PREFIX + [
-          'ec2',
-          'detach-internet-gateway',
-          '--region=%s' % self.region,
-          '--internet-gateway-id=%s' % self.id,
-          '--vpc-id=%s' % self.vpc_id]
-      util.IssueRetryableCommand(detach_cmd)
-      self.attached = False
-
 
 class AwsElasticIP(resource.BaseResource):
   """An object representing an Aws Internet Gateway."""
 
-  def __init__(self, domain='vpc'):
+  def __init__(self, region, domain='vpc'):
     super(AwsElasticIP, self).__init__()
-    assert domain in ('vpc', 'standard'), 
-      "Elastic IP domain type, %s, must be either vpc or standard"
+    assert (domain in ('vpc', 'standard')), "Elastic IP domain type, %s, must be either vpc or standard" % domain
     self.domain = domain
     self.public_ip = None
-    self.id = None
+    self.region = region
+    self.allocation_id = None
     self.attached = False
     self.instance_id = None
 
@@ -873,10 +941,11 @@ class AwsElasticIP(resource.BaseResource):
     create_cmd = util.AWS_PREFIX + [
         'ec2',
         'allocate-address',
-        '--domain', self.domain]
+        '--domain', self.domain,
+        '--region', self.region]
     stdout, _, _ = vm_util.IssueCommand(create_cmd)
     response = json.loads(stdout)
-    self.id = response['AllocationId']
+    self.allocation_id = response['AllocationId']
     self.public_ip = response['PublicIp']
     #util.AddDefaultTags(self.id, self.region)
 
@@ -885,7 +954,8 @@ class AwsElasticIP(resource.BaseResource):
     delete_cmd = util.AWS_PREFIX + [
         'ec2',
         'release-address',
-        '--allocation-id', self.id]
+        '--region', self.region,
+        '--allocation-id', self.allocation_id]
     vm_util.IssueCommand(delete_cmd)
 
   def _Exists(self):
@@ -893,7 +963,8 @@ class AwsElasticIP(resource.BaseResource):
     describe_cmd = util.AWS_PREFIX + [
         'ec2',
         'describe-addresses',
-        '--allocation-ids', self.id]
+        '--region', self.region,
+        '--allocation-ids', self.allocation_id]
     stdout, _ = util.IssueRetryableCommand(describe_cmd)
     response = json.loads(stdout)
     addresses = response['Addresses']
@@ -907,8 +978,9 @@ class AwsElasticIP(resource.BaseResource):
       attach_cmd = util.AWS_PREFIX + [
           'ec2',
           'associate-address',
+          '--region', self.region,
           '--instance-id', self.instance_id,
-          '--allocation-id' self.id]
+          '--allocation-id', self.allocation_id]
       util.IssueRetryableCommand(attach_cmd)
       self.attached = True
 
@@ -918,6 +990,7 @@ class AwsElasticIP(resource.BaseResource):
       detach_cmd = util.AWS_PREFIX + [
           'ec2',
           'disassociate-address',
-          '--association-id', self.id]
+          '--region', self.region,
+          '--association-id', self.allocation_id]
       util.IssueRetryableCommand(detach_cmd)
       self.attached = False
