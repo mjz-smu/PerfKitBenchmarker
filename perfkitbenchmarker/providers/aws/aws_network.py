@@ -666,17 +666,29 @@ class AwsGlobalAccelerator(resource.BaseResource):
     logging.info(self.ip_addresses)
     #util.AddDefaultTags(self.id, self.region)
 
+  @vm_util.Retry()
   def _Delete(self):
     """Deletes the Accelerator."""
     #TODO delete listeners
     self._Update(enabled=False)
+    status = self.Describe()
+    logging.info(status['Accelerator']['Enabled'])
+    logging.info(type(status['Accelerator']['Enabled']))
+    while status['Accelerator']['Enabled'] == True:
+      status = self.Describe()
+    
+    #TODO add delete listener
+    for listener in self.listeners:
+      listener._Delete()
+  
     delete_cmd = util.AWS_PREFIX + [
         'globalaccelerator',
         'delete-accelerator',
         '--region', self.region,
         '--accelerator-arn', self.accelerator_arn]
-    vm_util.IssueCommand(delete_cmd)
+    vm_util.IssueRetryableCommand(delete_cmd)
 
+  #@vm_util.Retry()
   def _Update(self,enabled):
     """Returns true if the internet gateway exists."""
     update_cmd = util.AWS_PREFIX + [
@@ -684,10 +696,14 @@ class AwsGlobalAccelerator(resource.BaseResource):
         'update-accelerator',
         '--region', self.region,
         '--accelerator-arn', self.accelerator_arn]
+    if enabled:
+      update_cmd += ['--enabled']
+    else:
+      update_cmd += ['--no-enabled']
     stdout, _ = util.IssueRetryableCommand(update_cmd)
     response = json.loads(stdout)
     accelerator = response['Accelerator']
-    assert accelerator['Enabled'] == enabled, 'Accelerator not updated'
+    # assert accelerator['Enabled'] == enabled, 'Accelerator not updated'
 
   def _Exists(self):
     """Returns true if the accelerator exists."""
@@ -701,6 +717,17 @@ class AwsGlobalAccelerator(resource.BaseResource):
     accelerator = response['Accelerator']
     return len(accelerator) > 0
 
+  def Describe(self):
+    """Returns true if the accelerator exists."""
+    describe_cmd = util.AWS_PREFIX + [
+        'globalaccelerator',
+        'describe-accelerator',
+        '--region', self.region,
+        '--accelerator-arn', self.accelerator_arn]
+    stdout, _ = util.IssueRetryableCommand(describe_cmd)
+    response = json.loads(stdout)
+    return response
+
   def Status(self):
     """Returns true if the accelerator exists."""
     describe_cmd = util.AWS_PREFIX + [
@@ -713,7 +740,7 @@ class AwsGlobalAccelerator(resource.BaseResource):
     status = response['Accelerator']['Status']
     return status
 
-  #  @vm_util.Retry(poll_interval=1, log_errors=False,
+  #  @vm_util.Retry(poll_interval=1, log_errors=False, max_retries=5
   #                retryable_exceptions=(AwsTransitionalVmRetryableError,))
   def isUp(self):
     """Returns true if the accelerator exists."""
@@ -807,6 +834,8 @@ class AwsGlobalAcceleratorListener(resource.BaseResource):
 
   def _Delete(self):
     """Deletes Listeners"""
+    for endpoint_group in self.endpoint_groups:
+      endpoint_group._Delete()
     delete_cmd = util.AWS_PREFIX + [
         'globalaccelerator',
         'delete-listener',
