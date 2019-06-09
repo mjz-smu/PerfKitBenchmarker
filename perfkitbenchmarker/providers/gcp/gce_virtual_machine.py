@@ -24,7 +24,12 @@ All VM specifics are self-contained and the class provides methods to
 operate on the VM: boot, shutdown, etc.
 """
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import collections
+import copy
 import itertools
 import json
 import logging
@@ -49,6 +54,8 @@ from perfkitbenchmarker.providers.gcp import gce_disk
 from perfkitbenchmarker.providers.gcp import gce_network
 from perfkitbenchmarker.providers.gcp import util
 
+import six
+from six.moves import range
 import yaml
 
 FLAGS = flags.FLAGS
@@ -57,17 +64,20 @@ NVME = 'NVME'
 SCSI = 'SCSI'
 UBUNTU_IMAGE = 'ubuntu-14-04'
 RHEL_IMAGE = 'rhel-7'
-WINDOWS_IMAGE = 'windows-2012-r2'
 _INSUFFICIENT_HOST_CAPACITY = ('does not have enough resources available '
                                'to fulfill the request.')
 STOCKOUT_MESSAGE = ('Creation failed due to insufficient capacity indicating a '
                     'potential stockout scenario.')
 _GCE_VM_CREATE_TIMEOUT = 600
-_GPU_TYPE_TO_INTERAL_NAME_MAP = {
-    'k80': 'nvidia-tesla-k80',
-    'p100': 'nvidia-tesla-p100',
-    'v100': 'nvidia-tesla-v100',
-}
+_GCE_NVIDIA_GPU_PREFIX = 'nvidia-tesla-'
+
+
+class GceUnexpectedWindowsAdapterOutputError(Exception):
+  """Raised when querying the status of a windows adapter failed."""
+
+
+class GceDriverDoesntSupportFeatureError(Exception):
+  """Raised if there is an attempt to set a feature not supported."""
 
 
 class GceVmSpec(virtual_machine.BaseVmSpec):
@@ -138,6 +148,11 @@ class GceVmSpec(virtual_machine.BaseVmSpec):
       if (flag_values.gcp_min_cpu_platform !=
           gcp_flags.GCP_MIN_CPU_PLATFORM_NONE):
         config_values['min_cpu_platform'] = flag_values.gcp_min_cpu_platform
+      else:
+        # Specifying gcp_min_cpu_platform explicitly removes any config.
+        config_values.pop('min_cpu_platform', None)
+    if flag_values['gce_tags'].present:
+      config_values['gce_tags'] = flag_values.gce_tags
 
   @classmethod
   def _GetOptionDecoderConstructions(cls):
@@ -150,19 +165,44 @@ class GceVmSpec(virtual_machine.BaseVmSpec):
     """
     result = super(GceVmSpec, cls)._GetOptionDecoderConstructions()
     result.update({
-        'machine_type': (custom_virtual_machine_spec.MachineTypeDecoder, {}),
-        'num_local_ssds': (option_decoders.IntDecoder, {'default': 0,
-                                                        'min': 0}),
-        'preemptible': (option_decoders.BooleanDecoder, {'default': False}),
-        'boot_disk_size': (option_decoders.IntDecoder, {'default': None}),
-        'boot_disk_type': (option_decoders.StringDecoder, {'default': None}),
-        'project': (option_decoders.StringDecoder, {'default': None}),
-        'image_family': (option_decoders.StringDecoder, {'default': None}),
-        'image_project': (option_decoders.StringDecoder, {'default': None}),
-        'node_type': (option_decoders.StringDecoder,
-                      {'default': 'n1-node-96-624'}),
-        'num_vms_per_host': (option_decoders.IntDecoder, {'default': None}),
-        'min_cpu_platform': (option_decoders.StringDecoder, {'default': None}),
+        'machine_type': (custom_virtual_machine_spec.MachineTypeDecoder, {
+            'default': None
+        }),
+        'num_local_ssds': (option_decoders.IntDecoder, {
+            'default': 0,
+            'min': 0
+        }),
+        'preemptible': (option_decoders.BooleanDecoder, {
+            'default': False
+        }),
+        'boot_disk_size': (option_decoders.IntDecoder, {
+            'default': None
+        }),
+        'boot_disk_type': (option_decoders.StringDecoder, {
+            'default': None
+        }),
+        'project': (option_decoders.StringDecoder, {
+            'default': None
+        }),
+        'image_family': (option_decoders.StringDecoder, {
+            'default': None
+        }),
+        'image_project': (option_decoders.StringDecoder, {
+            'default': None
+        }),
+        'node_type': (option_decoders.StringDecoder, {
+            'default': 'n1-node-96-624'
+        }),
+        'num_vms_per_host': (option_decoders.IntDecoder, {
+            'default': None
+        }),
+        'min_cpu_platform': (option_decoders.StringDecoder, {
+            'default': None
+        }),
+        'gce_tags': (option_decoders.ListDecoder, {
+            'item_decoder': option_decoders.StringDecoder(),
+            'default': None
+        }),
     })
     return result
 
@@ -185,7 +225,7 @@ class GceSoleTenantNodeTemplate(resource.BaseResource):
 
   def _Create(self):
     """Creates the node template."""
-    cmd = util.GcloudCommand(self, 'alpha', 'compute', 'sole-tenancy',
+    cmd = util.GcloudCommand(self, 'compute', 'sole-tenancy',
                              'node-templates', 'create', self.name)
     cmd.flags['node-type'] = self.node_type
     cmd.flags['region'] = self.region
@@ -193,7 +233,7 @@ class GceSoleTenantNodeTemplate(resource.BaseResource):
 
   def _Exists(self):
     """Returns True if the node template exists."""
-    cmd = util.GcloudCommand(self, 'alpha', 'compute', 'sole-tenancy',
+    cmd = util.GcloudCommand(self, 'compute', 'sole-tenancy',
                              'node-templates', 'describe', self.name)
     cmd.flags['region'] = self.region
     _, _, retcode = cmd.Issue(suppress_warning=True)
@@ -201,7 +241,7 @@ class GceSoleTenantNodeTemplate(resource.BaseResource):
 
   def _Delete(self):
     """Deletes the node template."""
-    cmd = util.GcloudCommand(self, 'alpha', 'compute', 'sole-tenancy',
+    cmd = util.GcloudCommand(self, 'compute', 'sole-tenancy',
                              'node-templates', 'delete', self.name)
     cmd.flags['region'] = self.region
     cmd.Issue()
@@ -222,7 +262,7 @@ class GceSoleTenantNodeGroup(resource.BaseResource):
   def __init__(self, node_type, zone, project):
     super(GceSoleTenantNodeGroup, self).__init__()
     with self._counter_lock:
-      self.instance_number = self._counter.next()
+      self.instance_number = next(self._counter)
     self.name = 'pkb-node-group-%s-%s' % (FLAGS.run_uri, self.instance_number)
     self.node_type = node_type
     self.node_template = None
@@ -232,11 +272,12 @@ class GceSoleTenantNodeGroup(resource.BaseResource):
 
   def _Create(self):
     """Creates the host."""
-    cmd = util.GcloudCommand(self, 'alpha', 'compute', 'sole-tenancy',
+    cmd = util.GcloudCommand(self, 'compute', 'sole-tenancy',
                              'node-groups', 'create', self.name)
     cmd.flags['node-template'] = self.node_template.name
     cmd.flags['target-size'] = 1
-    cmd.Issue()
+    _, stderr, retcode = cmd.Issue()
+    util.CheckGcloudResponseKnownFailures(stderr, retcode)
 
   def _CreateDependencies(self):
     super(GceSoleTenantNodeGroup, self)._CreateDependencies()
@@ -252,14 +293,14 @@ class GceSoleTenantNodeGroup(resource.BaseResource):
 
   def _Exists(self):
     """Returns True if the host exists."""
-    cmd = util.GcloudCommand(self, 'alpha', 'compute', 'sole-tenancy',
+    cmd = util.GcloudCommand(self, 'compute', 'sole-tenancy',
                              'node-groups', 'describe', self.name)
     _, _, retcode = cmd.Issue(suppress_warning=True)
     return not retcode
 
   def _Delete(self):
     """Deletes the host."""
-    cmd = util.GcloudCommand(self, 'alpha', 'compute', 'sole-tenancy',
+    cmd = util.GcloudCommand(self, 'compute', 'sole-tenancy',
                              'node-groups', 'delete', self.name)
     cmd.Issue()
 
@@ -282,7 +323,7 @@ def GenerateAcceleratorSpecString(accelerator_type, accelerator_count):
     Must be prepended by the flag '--accelerator'.
   """
   gce_accelerator_type = (FLAGS.gce_accelerator_type_override or
-                          _GPU_TYPE_TO_INTERAL_NAME_MAP[accelerator_type])
+                          _GCE_NVIDIA_GPU_PREFIX + accelerator_type)
   return 'type={0},count={1}'.format(
       gce_accelerator_type,
       accelerator_count)
@@ -299,6 +340,8 @@ class GceVirtualMachine(virtual_machine.BaseVirtualMachine):
   DEFAULT_IMAGE_PROJECT = None
   BOOT_DISK_SIZE_GB = 10
   BOOT_DISK_TYPE = gce_disk.PD_STANDARD
+
+  NVME_START_INDEX = 1
 
   _host_lock = threading.Lock()
   deleted_hosts = set()
@@ -323,11 +366,13 @@ class GceVirtualMachine(virtual_machine.BaseVirtualMachine):
     self.max_local_disks = vm_spec.num_local_ssds
     self.memory_mib = vm_spec.memory
     self.preemptible = vm_spec.preemptible
+    self.early_termination = False
+    self.preemptible_status_code = None
     self.project = vm_spec.project or util.GetDefaultProject()
     self.image_family = vm_spec.image_family or self.DEFAULT_IMAGE_FAMILY
     self.image_project = vm_spec.image_project or self.DEFAULT_IMAGE_PROJECT
     self.backfill_image = False
-    self.network = gce_network.GceNetwork.GetNetwork(self)
+    self.network = self._GetNetwork()
     self.firewall = gce_network.GceFirewall.GetFirewall()
     self.boot_disk_size = vm_spec.boot_disk_size
     self.boot_disk_type = vm_spec.boot_disk_type
@@ -339,6 +384,13 @@ class GceVirtualMachine(virtual_machine.BaseVirtualMachine):
     self.min_cpu_platform = vm_spec.min_cpu_platform
     self.gce_remote_access_firewall_rule = FLAGS.gce_remote_access_firewall_rule
     self.gce_accelerator_type_override = FLAGS.gce_accelerator_type_override
+    self.gce_tags = vm_spec.gce_tags
+    self.gce_network_tier = FLAGS.gce_network_tier
+    self.gce_shielded_secure_boot = FLAGS.gce_shielded_secure_boot
+
+  def _GetNetwork(self):
+    """Returns the GceNetwork to use."""
+    return gce_network.GceNetwork.GetNetwork(self)
 
   @property
   def host_list(self):
@@ -354,10 +406,7 @@ class GceVirtualMachine(virtual_machine.BaseVirtualMachine):
     Returns:
       GcloudCommand. gcloud command to issue in order to create the VM instance.
     """
-    args = []
-    if self.node_group:
-      args = ['alpha']
-    args.extend(['compute', 'instances', 'create', self.name])
+    args = ['compute', 'instances', 'create', self.name]
 
     cmd = util.GcloudCommand(self, *args)
     if self.network.subnet_resource is not None:
@@ -381,37 +430,39 @@ class GceVirtualMachine(virtual_machine.BaseVirtualMachine):
     if self.gpu_count:
       cmd.flags['accelerator'] = GenerateAcceleratorSpecString(self.gpu_type,
                                                                self.gpu_count)
-    cmd.flags['tags'] = 'perfkitbenchmarker'
+    cmd.flags['tags'] = ','.join(['perfkitbenchmarker'] + (self.gce_tags or []))
     cmd.flags['no-restart-on-failure'] = True
     if self.node_group:
       cmd.flags['node-group'] = self.node_group.name
     if self.min_cpu_platform:
       cmd.flags['min-cpu-platform'] = self.min_cpu_platform
+    if self.gce_shielded_secure_boot:
+      cmd.flags['shielded-secure-boot'] = True
 
     metadata_from_file = {'sshKeys': ssh_keys_path}
     parsed_metadata_from_file = flag_util.ParseKeyValuePairs(
         FLAGS.gcp_instance_metadata_from_file)
-    for key, value in parsed_metadata_from_file.iteritems():
+    for key, value in six.iteritems(parsed_metadata_from_file):
       if key in metadata_from_file:
         logging.warning('Metadata "%s" is set internally. Cannot be overridden '
                         'from command line.', key)
         continue
       metadata_from_file[key] = value
     cmd.flags['metadata-from-file'] = ','.join([
-        '%s=%s' % (k, v) for k, v in metadata_from_file.iteritems()
+        '%s=%s' % (k, v) for k, v in six.iteritems(metadata_from_file)
     ])
 
     metadata = {'owner': FLAGS.owner} if FLAGS.owner else {}
     metadata.update(self.boot_metadata)
     parsed_metadata = flag_util.ParseKeyValuePairs(FLAGS.gcp_instance_metadata)
-    for key, value in parsed_metadata.iteritems():
+    for key, value in six.iteritems(parsed_metadata):
       if key in metadata:
         logging.warning('Metadata "%s" is set internally. Cannot be overridden '
                         'from command line.', key)
         continue
       metadata[key] = value
     cmd.flags['metadata'] = ','.join(
-        ['%s=%s' % (k, v) for k, v in metadata.iteritems()])
+        ['%s=%s' % (k, v) for k, v in six.iteritems(metadata)])
 
     # TODO(gareth-ferneyhough): If GCE one day supports live migration on GPUs
     #                           this can be revised.
@@ -422,13 +473,14 @@ class GceVirtualMachine(virtual_machine.BaseVirtualMachine):
           'as it is not supported by GCP.')
     if not FLAGS.gce_migrate_on_maintenance or self.gpu_count:
       cmd.flags['maintenance-policy'] = 'TERMINATE'
-    ssd_interface_option = FLAGS.gce_ssd_interface
-    cmd.flags['local-ssd'] = (['interface={0}'.format(ssd_interface_option)] *
-                              self.max_local_disks)
+    cmd.flags['local-ssd'] = (['interface={0}'.format(
+        FLAGS.gce_ssd_interface)] * self.max_local_disks)
     if FLAGS.gcloud_scopes:
       cmd.flags['scopes'] = ','.join(re.split(r'[,; ]', FLAGS.gcloud_scopes))
     if self.preemptible:
       cmd.flags['preemptible'] = True
+    cmd.flags['network-tier'] = self.gce_network_tier.upper()
+
     return cmd
 
   def _Create(self):
@@ -436,7 +488,7 @@ class GceVirtualMachine(virtual_machine.BaseVirtualMachine):
     num_hosts = len(self.host_list)
     with open(self.ssh_public_key) as f:
       public_key = f.read().rstrip('\n')
-    with vm_util.NamedTemporaryFile(dir=vm_util.GetTempDir(),
+    with vm_util.NamedTemporaryFile(mode='w', dir=vm_util.GetTempDir(),
                                     prefix='key-metadata') as tf:
       tf.write('%s:%s\n' % (self.user_name, public_key))
       tf.close()
@@ -490,17 +542,33 @@ class GceVirtualMachine(virtual_machine.BaseVirtualMachine):
           self.node_group.Delete()
           self.deleted_hosts.add(self.node_group)
 
+  def _ParseDescribeResponse(self, describe_response):
+    """Sets the ID and IP addresses from a response to the describe command.
+
+    Args:
+      describe_response: JSON-loaded response to the describe gcloud command.
+
+    Raises:
+      KeyError, IndexError: If the ID and IP addresses cannot be parsed.
+    """
+    self.id = describe_response['id']
+    network_interface = describe_response['networkInterfaces'][0]
+    self.internal_ip = network_interface['networkIP']
+    self.ip_address = network_interface['accessConfigs'][0]['natIP']
+
+  def _NeedsToParseDescribeResponse(self):
+    """Returns whether the ID and IP addresses still need to be set."""
+    return not self.id or not self.internal_ip or not self.ip_address
+
   @vm_util.Retry()
   def _PostCreate(self):
     """Get the instance's data."""
-    getinstance_cmd = util.GcloudCommand(self, 'compute', 'instances',
-                                         'describe', self.name)
-    stdout, _, _ = getinstance_cmd.Issue()
-    response = json.loads(stdout)
-    self.id = response['id']
-    network_interface = response['networkInterfaces'][0]
-    self.internal_ip = network_interface['networkIP']
-    self.ip_address = network_interface['accessConfigs'][0]['natIP']
+    if self._NeedsToParseDescribeResponse():
+      getinstance_cmd = util.GcloudCommand(self, 'compute', 'instances',
+                                           'describe', self.name)
+      stdout, _, _ = getinstance_cmd.Issue()
+      response = json.loads(stdout)
+      self._ParseDescribeResponse(response)
     if not self.image:
       getdisk_cmd = util.GcloudCommand(
           self, 'compute', 'disks', 'describe', self.name)
@@ -521,9 +589,19 @@ class GceVirtualMachine(virtual_machine.BaseVirtualMachine):
                                          'describe', self.name)
     stdout, _, _ = getinstance_cmd.Issue(suppress_warning=True)
     try:
-      json.loads(stdout)
+      response = json.loads(stdout)
     except ValueError:
       return False
+    try:
+      # The VM may exist before we can fully parse the describe response for the
+      # IP address or ID of the VM. For example, if the VM has a status of
+      # provisioning, we can't yet parse the IP address. If this is the case, we
+      # will continue to invoke the describe command in _PostCreate above.
+      # However, if we do have this information now, it's better to stash it and
+      # avoid invoking the describe command again.
+      self._ParseDescribeResponse(response)
+    except (KeyError, IndexError):
+      pass
     return True
 
   def CreateScratchDisk(self, disk_spec):
@@ -534,16 +612,19 @@ class GceVirtualMachine(virtual_machine.BaseVirtualMachine):
     """
     disks = []
 
-    for i in xrange(disk_spec.num_striped_disks):
+    for i in range(disk_spec.num_striped_disks):
       if disk_spec.disk_type == disk.LOCAL:
         name = ''
         if FLAGS.gce_ssd_interface == SCSI:
           name = 'local-ssd-%d' % self.local_disk_counter
+          disk_number = self.local_disk_counter + 1
         elif FLAGS.gce_ssd_interface == NVME:
           name = 'nvme0n%d' % (self.local_disk_counter + 1)
+          disk_number = self.local_disk_counter + self.NVME_START_INDEX
+        else:
+          raise errors.Error('Unknown Local SSD Interface.')
         data_disk = gce_disk.GceDisk(disk_spec, name, self.zone, self.project)
-        # Local disk numbers start at 1 (0 is the system disk).
-        data_disk.disk_number = self.local_disk_counter + 1
+        data_disk.disk_number = disk_number
         self.local_disk_counter += 1
         if self.local_disk_counter > self.max_local_disks:
           raise errors.Error('Not enough local disks.')
@@ -560,13 +641,21 @@ class GceVirtualMachine(virtual_machine.BaseVirtualMachine):
     self._CreateScratchDiskFromDisks(disk_spec, disks)
 
   def AddMetadata(self, **kwargs):
-    """Adds metadata to the VM via 'gcloud compute instances add-metadata'."""
+    """Adds metadata to the VM and disk."""
     if not kwargs:
       return
     cmd = util.GcloudCommand(self, 'compute', 'instances', 'add-metadata',
                              self.name)
-    cmd.flags['metadata'] = ','.join('{0}={1}'.format(key, value)
-                                     for key, value in kwargs.iteritems())
+    cmd.flags['metadata'] = util.MakeFormattedDefaultTags()
+    if kwargs:
+      cmd.flags['metadata'] = '{metadata},{kwargs}'.format(
+          metadata=cmd.flags['metadata'],
+          kwargs=util.FormatTags(kwargs))
+    cmd.Issue()
+
+    cmd = util.GcloudCommand(
+        self, 'compute', 'disks', 'add-labels', self.name)
+    cmd.flags['labels'] = util.MakeFormattedDefaultTags()
     cmd.Issue()
 
   def AllowRemoteAccessPorts(self):
@@ -606,6 +695,14 @@ class GceVirtualMachine(virtual_machine.BaseVirtualMachine):
       result['gpu_count'] = self.gpu_count
     if self.gce_accelerator_type_override:
       result['accelerator_type_override'] = self.gce_accelerator_type_override
+    if self.gce_tags:
+      result['gce_tags'] = ','.join(self.gce_tags)
+    if self.max_local_disks:
+      result['gce_local_ssd_count'] = self.max_local_disks
+      result['gce_local_ssd_interface'] = FLAGS.gce_ssd_interface
+    result['gce_network_tier'] = self.gce_network_tier
+    result[
+        'gce_shielded_secure_boot'] = self.gce_shielded_secure_boot
     return result
 
   def SimulateMaintenanceEvent(self):
@@ -617,21 +714,57 @@ class GceVirtualMachine(virtual_machine.BaseVirtualMachine):
       raise errors.VirtualMachine.VirtualMachineError(
           'Unable to simulate maintenance event.')
 
-  def DownloadPreprovisionedBenchmarkData(self, install_path, benchmark_name,
-                                          filename):
+  def DownloadPreprovisionedData(self, install_path, module_name, filename):
     """Downloads a data file from a GCS bucket with pre-provisioned data.
 
     Use --gce_preprovisioned_data_bucket to specify the name of the bucket.
 
     Args:
       install_path: The install path on this VM.
-      benchmark_name: Name of the benchmark associated with this data file.
+      module_name: Name of the module associated with this data file.
       filename: The name of the file that was downloaded.
     """
     # TODO(deitz): Add retry logic.
-    self.RemoteCommand('gsutil -q cp gs://%s/%s/%s %s' % (
-        FLAGS.gcp_preprovisioned_data_bucket, benchmark_name, filename,
-        posixpath.join(install_path, filename)))
+    self.RemoteCommand(GenerateDownloadPreprovisionedDataCommand(
+        install_path, module_name, filename))
+
+  @vm_util.Retry(max_retries=5)
+  def UpdateInterruptibleVmStatus(self):
+    """Updates the interruptible status if the VM was preempted."""
+    if self.preemptible:
+      # Drop zone since compute operations list takes 'zones', not 'zone', and
+      # the argument is deprecated in favor of --filter.
+      vm_without_zone = copy.copy(self)
+      vm_without_zone.zone = None
+      gcloud_command = util.GcloudCommand(vm_without_zone, 'compute',
+                                          'operations', 'list')
+      gcloud_command.flags['filter'] = 'zone:%s targetLink.scope():%s' % (
+          self.zone, self.name)
+      stdout, _, _ = gcloud_command.Issue()
+      self.early_termination = any(
+          operation['operationType'] == 'compute.instances.preempted'
+          for operation in json.loads(stdout))
+
+  def IsInterruptible(self):
+    """Returns whether this vm is an interruptible vm (spot vm).
+
+    Returns: True if this vm is an interruptible vm (spot vm).
+    """
+    return self.preemptible
+
+  def WasInterrupted(self):
+    """Returns whether this spot vm was terminated early by GCP.
+
+    Returns: True if this vm was terminated early by GCP.
+    """
+    return self.early_termination
+
+  def GetVmStatusCode(self):
+    """Returns the early termination code if any.
+
+    Returns: Early termination code.
+    """
+    return self.preemptible_status_code
 
 
 class ContainerizedGceVirtualMachine(GceVirtualMachine,
@@ -685,9 +818,9 @@ class Ubuntu1604BasedGceVirtualMachine(GceVirtualMachine,
   DEFAULT_IMAGE_PROJECT = 'ubuntu-os-cloud'
 
 
-class Ubuntu1710BasedGceVirtualMachine(GceVirtualMachine,
-                                       linux_vm.Ubuntu1710Mixin):
-  DEFAULT_IMAGE_FAMILY = 'ubuntu-1710'
+class Ubuntu1804BasedGceVirtualMachine(GceVirtualMachine,
+                                       linux_vm.Ubuntu1804Mixin):
+  DEFAULT_IMAGE_FAMILY = 'ubuntu-1804-lts'
   DEFAULT_IMAGE_PROJECT = 'ubuntu-os-cloud'
 
 
@@ -695,9 +828,11 @@ class WindowsGceVirtualMachine(GceVirtualMachine,
                                windows_virtual_machine.WindowsMixin):
   """Class supporting Windows GCE virtual machines."""
 
-  DEFAULT_IMAGE = WINDOWS_IMAGE
+  DEFAULT_IMAGE_FAMILY = 'windows-2012-r2'
+  DEFAULT_IMAGE_PROJECT = 'windows-cloud'
   BOOT_DISK_SIZE_GB = 50
-  BOOT_DISK_TYPE = gce_disk.PD_SSD
+
+  NVME_START_INDEX = 0
 
   def __init__(self, vm_spec):
     """Initialize a Windows GCE virtual machine.
@@ -727,3 +862,72 @@ class WindowsGceVirtualMachine(GceVirtualMachine,
     stdout, _ = reset_password_cmd.IssueRetryable()
     response = json.loads(stdout)
     self.password = response['password']
+
+  @vm_util.Retry(
+      max_retries=10,
+      retryable_exceptions=(GceUnexpectedWindowsAdapterOutputError,
+                            errors.VirtualMachine.RemoteCommandError))
+  def GetResourceMetadata(self):
+    """Returns a dict containing metadata about the VM.
+
+    Returns:
+      dict mapping metadata key to value.
+    """
+    result = super(WindowsGceVirtualMachine, self).GetResourceMetadata()
+    result['disable_rss'] = self.disable_rss
+    return result
+
+  def DisableRSS(self):
+    """Disables RSS on the GCE VM.
+
+    Raises:
+      GceDriverDoesntSupportFeatureError: If RSS is not supported.
+      GceUnexpectedWindowsAdapterOutputError: If querying the RSS state
+        returns unexpected output.
+    """
+    # First ensure that the driver supports interrupt moderation
+    net_adapters, _ = self.RemoteCommand('Get-NetAdapter')
+    if 'Red Hat VirtIO Ethernet Adapter' not in net_adapters:
+      raise GceDriverDoesntSupportFeatureError(
+          'Driver not tested with RSS disabled in PKB.')
+
+    command = 'netsh int tcp set global rss=disabled'
+    self.RemoteCommand(command)
+    try:
+      self.RemoteCommand('Restart-NetAdapter -Name "Ethernet"')
+    except IOError:
+      # Restarting the network adapter will always fail because
+      # the winrm connection used to issue the command will be
+      # broken.
+      pass
+
+    # Verify the setting went through
+    stdout, _ = self.RemoteCommand('netsh int tcp show global')
+    if 'Receive-Side Scaling State          : enabled' in stdout:
+      raise GceUnexpectedWindowsAdapterOutputError('RSS failed to disable.')
+
+
+class Windows2012GceVirtualMachine(WindowsGceVirtualMachine,
+                                   windows_virtual_machine.Windows2012Mixin):
+  DEFAULT_IMAGE_FAMILY = 'windows-2012-r2'
+  DEFAULT_IMAGE_PROJECT = 'windows-cloud'
+
+
+class Windows2016GceVirtualMachine(WindowsGceVirtualMachine,
+                                   windows_virtual_machine.Windows2016Mixin):
+  DEFAULT_IMAGE_FAMILY = 'windows-2016'
+  DEFAULT_IMAGE_PROJECT = 'windows-cloud'
+
+
+class Windows2019GceVirtualMachine(WindowsGceVirtualMachine,
+                                   windows_virtual_machine.Windows2019Mixin):
+  DEFAULT_IMAGE_FAMILY = 'windows-2019'
+  DEFAULT_IMAGE_PROJECT = 'windows-cloud'
+
+
+def GenerateDownloadPreprovisionedDataCommand(install_path, module_name,
+                                              filename):
+  """Returns a string used to download preprovisioned data."""
+  return 'gsutil -q cp gs://%s/%s/%s %s' % (
+      FLAGS.gcp_preprovisioned_data_bucket, module_name, filename,
+      posixpath.join(install_path, filename))

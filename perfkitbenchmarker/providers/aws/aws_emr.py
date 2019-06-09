@@ -18,21 +18,19 @@ Spark clusters can be created and deleted.
 
 import json
 import logging
-
 from perfkitbenchmarker import flags
 from perfkitbenchmarker import providers
 from perfkitbenchmarker import resource
 from perfkitbenchmarker import spark_service
 from perfkitbenchmarker import vm_util
-
-import aws_network
-import util
+from perfkitbenchmarker.providers.aws import aws_network
+from perfkitbenchmarker.providers.aws import util
 
 
 FLAGS = flags.FLAGS
 
 DEFAULT_MACHINE_TYPE = 'm3.xlarge'
-RELEASE_LABEL = 'emr-4.5.0'
+RELEASE_LABEL = 'emr-5.23.0'
 READY_CHECK_SLEEP = 30
 READY_CHECK_TRIES = 60
 READY_STATE = 'WAITING'
@@ -45,7 +43,7 @@ MANAGER_SG = 'EmrManagedMasterSecurityGroup'
 WORKER_SG = 'EmrManagedSlaveSecurityGroup'
 
 # Certain machine types require a subnet.
-NEEDS_SUBNET = ['m4', 'c4']
+NEEDS_SUBNET = ['m4', 'c4', 'm5', 'c5']
 
 
 class AwsSecurityGroup(resource.BaseResource):
@@ -172,6 +170,16 @@ class AwsEMR(spark_service.BaseSparkService):
     result = json.loads(stdout)
     self.cluster_id = result['ClusterId']
     logging.info('Cluster created with id %s', self.cluster_id)
+    for tag_key, tag_value in util.MakeDefaultTags().items():
+      self._AddTag(tag_key, tag_value)
+
+  def _AddTag(self, key, value):
+    """Add the key value pair as a tag to the emr cluster."""
+    cmd = self.cmd_prefix + ['emr', 'add-tags',
+                             '--resource-id', self.cluster_id,
+                             '--tag',
+                             '{}={}'.format(key, value)]
+    vm_util.IssueCommand(cmd)
 
   def _DeleteSecurityGroups(self):
     """Delete the security groups associated with this cluster."""
@@ -388,3 +396,9 @@ class AwsEMR(spark_service.BaseSparkService):
 
   def SetClusterProperty(self):
     pass
+
+  def ExecuteOnMaster(self, script_path, script_args):
+    raise NotImplementedError()
+
+  def CopyFromMaster(self, remote_path, local_path):
+    raise NotImplementedError()

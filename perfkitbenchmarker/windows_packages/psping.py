@@ -22,6 +22,7 @@ psping is a tool made for benchmarking Windows networking.
 import json
 import ntpath
 
+from perfkitbenchmarker import background_tasks
 from perfkitbenchmarker import errors
 from perfkitbenchmarker import flags
 from perfkitbenchmarker import sample
@@ -54,6 +55,8 @@ def Install(vm):
   zip_path = ntpath.join(vm.temp_dir, PSPING_ZIP)
   vm.DownloadFile(PSPING_URL, zip_path)
   vm.UnzipFile(zip_path, vm.temp_dir)
+  vm.AllowPort(TEST_PORT)
+  vm.SetProcessPriorityToHighByFlag('psping.exe')
 
 
 def StartPspingServer(vm):
@@ -68,13 +71,14 @@ def StartPspingServer(vm):
 
 def _RunPsping(vm, command):
   try:
-    vm.RemoteCommand(command)
+    vm.RemoteCommand(command, timeout=FLAGS.psping_timeout)
   except errors.VirtualMachine.RemoteCommandError:
     # We expect psping to return an error here because the psping server has
     # to be killed with a CTRL+C.
     pass
 
 
+@vm_util.Retry(max_retries=3)
 def RunLatencyTest(sending_vm, receiving_vm, use_internal_ip=True):
   """Run the psping latency test.
 
@@ -109,20 +113,13 @@ def RunLatencyTest(sending_vm, receiving_vm, use_internal_ip=True):
   # server as a background job, then kill it after 10 seconds
   server_command = (
       '{psping_exec_dir}\\psping.exe /accepteula -s 0.0.0.0:{port};').format(
-          psping_exec_dir=sending_vm.temp_dir,
+          psping_exec_dir=receiving_vm.temp_dir,
           port=TEST_PORT)
 
-  # psping does not have a way to exit without killing the program from the
-  # outside. Therefore we need an extra command running whose only purpose
-  # is to kill the server after a timeout.
-  killer_command = 'timeout /t {timeout}; taskkill /F /im psping.exe'.format(
-      timeout=FLAGS.psping_timeout)
+  process_args = [(_RunPsping, (receiving_vm, server_command), {}),
+                  (_RunPsping, (sending_vm, client_command), {})]
 
-  threaded_args = [((sending_vm, client_command), {}),
-                   ((receiving_vm, server_command), {}),
-                   ((receiving_vm, killer_command), {})]
-
-  vm_util.RunThreaded(_RunPsping, threaded_args)
+  background_tasks.RunParallelProcesses(process_args, 200, 1)
 
   cat_command = 'cd {psping_exec_dir}; cat {out_file}'.format(
       psping_exec_dir=sending_vm.temp_dir,
@@ -225,8 +222,10 @@ def ParsePspingResults(results, client_vm, server_vm, internal_ip_used):
 
     index += 1
 
-  metadata.update({'histogram': json.dumps(histogram)})
+  histogram_metadata = metadata.copy()
+  histogram_metadata.update({'histogram': json.dumps(histogram)})
 
-  samples.append(sample.Sample('latency:histogram', 0, 'ms', metadata))
+  samples.append(
+      sample.Sample('latency:histogram', 0, 'ms', histogram_metadata))
 
   return samples

@@ -11,12 +11,14 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Module containing mixin classes for Windows virtual machines."""
 
 import base64
 import logging
 import ntpath
 import os
 import time
+import uuid
 
 from perfkitbenchmarker import disk
 from perfkitbenchmarker import errors
@@ -26,6 +28,7 @@ from perfkitbenchmarker import virtual_machine
 from perfkitbenchmarker import vm_util
 from perfkitbenchmarker import windows_packages
 
+import timeout_decorator
 import winrm
 
 FLAGS = flags.FLAGS
@@ -34,6 +37,11 @@ flags.DEFINE_bool(
     'log_windows_password', False,
     'Whether to log passwords for Windows machines. This can be useful in '
     'the event of needing to manually RDP to the instance.')
+
+flags.DEFINE_bool(
+    'set_cpu_priority_high', False,
+    'Allows executables to be set to High (up from Normal) CPU priority '
+    'through the SetProcessPriorityToHigh function.')
 
 SMB_PORT = 445
 WINRM_PORT = 5986
@@ -60,10 +68,26 @@ netsh advfirewall firewall add rule name='Allow RDP' dir=in action=allow `
 STARTUP_SCRIPT = 'powershell -EncodedCommand {encoded_command}'.format(
     encoded_command=base64.b64encode(_STARTUP_SCRIPT.encode('utf-16-le')))
 
+# Cygwin constants for installing and running commands through Cygwin.
+# _CYGWIN_FORMAT provides a format string to transform a bash command into one
+# that runs under Cygwin.
+_CYGWIN32_URL = 'https://cygwin.com/setup-x86.exe'
+_CYGWIN64_URL = 'https://cygwin.com/setup-x86_64.exe'
+_CYGWIN_MIRROR = 'http://cygwin.mirror.constant.com'
+_CYGWIN_ROOT = r'%PROGRAMFILES%\cygwinx86\cygwin'
+_CYGWIN_FORMAT = (r"%s\bin\bash.exe -c 'export PATH=$PATH:/usr/bin && "
+                  "{command}'" % _CYGWIN_ROOT)
+
+
+class WaitTimeoutError(Exception):
+  """Exception thrown if a wait operation takes too long."""
+
 
 class WindowsMixin(virtual_machine.BaseOsMixin):
+  """Class that holds Windows related VM methods and attributes."""
 
   OS_TYPE = os_types.WINDOWS
+  BASE_OS_TYPE = os_types.WINDOWS
 
   def __init__(self):
     super(WindowsMixin, self).__init__()
@@ -73,41 +97,128 @@ class WindowsMixin(virtual_machine.BaseOsMixin):
     self.temp_dir = None
     self.home_dir = None
     self.system_drive = None
+    self._send_remote_commands_to_cygwin = False
 
   def RobustRemoteCommand(self, command, should_log=False, ignore_failure=False,
                           suppress_warning=False, timeout=None):
-    logging.warning('RobustRemoteCommand not implemented for windows.'
-                    ' Using RemoteCommand instead.')
-    return self.RemoteCommand(command, should_log, ignore_failure,
-                              suppress_warning, timeout)
+    """Runs a powershell command on the VM.
+
+    Should be more robust than its counterpart, RemoteCommand. In the event of
+    network failure, the process will continue on the VM, and we continually
+    reconnect to check if it has finished. The tradeoff is this is noticeably
+    slower than the normal RemoteCommand.
+
+    The algorithm works as follows:
+      1. Create a "command started" file
+      2. Run the command
+      3. Create a "command done" file
+
+    If we fail to run step 1, we raise a RemoteCommandError. If we have network
+    failure during step 2, the command will continue running on the VM and we
+    will spin inside this function waiting for the "command done" file to be
+    created.
+
+    Args:
+      command: A valid powershell command.
+      should_log: A boolean indicating whether the command result should be
+        logged at the info level. Even if it is false, the results will still be
+        logged at the debug level.
+      ignore_failure: Ignore any failure if set to true.
+      suppress_warning: Suppress the result logging from IssueCommand when the
+        return code is non-zero.
+      timeout: Float. A timeout in seconds for the command. If None is passed,
+        no timeout is applied. Timeout kills the winrm session which then kills
+        the process being executed.
+
+    Returns:
+      A tuple of stdout and stderr from running the command.
+
+    Raises:
+      RemoteCommandError: If there was a problem issuing the command or the
+          command timed out.
+    """
+
+    logging.info('Running robust command on %s: %s', self, command)
+    command_id = uuid.uuid4()
+    logged_command = ('New-Item -Path %s.start -ItemType File; powershell "%s" '
+                      '2> %s.err 1> %s.out; New-Item -Path %s.done -ItemType '
+                      'File') % (command_id, command, command_id, command_id,
+                                 command_id)
+    start_command_time = time.time()
+    try:
+      self.RemoteCommand(
+          logged_command,
+          should_log=should_log,
+          ignore_failure=ignore_failure,
+          suppress_warning=suppress_warning,
+          timeout=timeout)
+    except errors.VirtualMachine.RemoteCommandError:
+      logging.exception(
+          'Exception while running %s on %s, waiting for command to finish',
+          command, self)
+    start_out, _ = self.RemoteCommand('Test-Path %s.start' % (command_id,))
+    if 'True' not in start_out:
+      raise errors.VirtualMachine.RemoteCommandError(
+          'RobustRemoteCommand did not start on VM.')
+
+    end_command_time = time.time()
+
+    @timeout_decorator.timeout(
+        timeout - (end_command_time - start_command_time),
+        use_signals=False,
+        timeout_exception=errors.VirtualMachine.RemoteCommandError)
+    def wait_for_done_file():
+      # Spin on the VM until the "done" file is created. It is better to spin
+      # on the VM rather than creating a new session for each test.
+      done_out = ''
+      while 'True' not in done_out:
+        done_out, _ = self.RemoteCommand(
+            '$retries=0; while ((-not (Test-Path %s.done)) -and '
+            '($retries -le 60)) { Start-Sleep -Seconds 1; $retries++ }; '
+            'Test-Path %s.done' % (command_id, command_id))
+
+    wait_for_done_file()
+    stdout, _ = self.RemoteCommand('Get-Content %s.out' % (command_id,))
+    _, stderr = self.RemoteCommand('Get-Content %s.err' % (command_id,))
+
+    return stdout, stderr
 
   def RemoteCommand(self, command, should_log=False, ignore_failure=False,
                     suppress_warning=False, timeout=None):
     """Runs a powershell command on the VM.
 
     Args:
-      command: A valid bash command.
+      command: A valid powershell command.
       should_log: A boolean indicating whether the command result should be
           logged at the info level. Even if it is false, the results will
           still be logged at the debug level.
       ignore_failure: Ignore any failure if set to true.
       suppress_warning: Suppress the result logging from IssueCommand when the
           return code is non-zero.
-      timeout: A timeout in seconds for the command. This argument is currently
-          unused.
+      timeout: Float. A timeout in seconds for the command. If None is passed,
+          no timeout is applied. Timeout kills the winrm session which then
+          kills the process being executed.
 
     Returns:
       A tuple of stdout and stderr from running the command.
 
     Raises:
-      RemoteCommandError: If there was a problem issuing the command.
+      RemoteCommandError: If there was a problem issuing the command or the
+          command timed out.
     """
     logging.info('Running command on %s: %s', self, command)
     s = winrm.Session('https://%s:%s' % (self.ip_address, self.winrm_port),
                       auth=(self.user_name, self.password),
                       server_cert_validation='ignore')
     encoded_command = base64.b64encode(command.encode('utf_16_le'))
-    r = s.run_cmd('powershell -encodedcommand %s' % encoded_command)
+
+    @timeout_decorator.timeout(timeout, use_signals=False,
+                               timeout_exception=errors.VirtualMachine.
+                               RemoteCommandError)
+    def run_command():
+      return s.run_cmd('powershell -encodedcommand %s' % encoded_command)
+
+    r = run_command()
     retcode, stdout, stderr = r.status_code, r.std_out, r.std_err
 
     debug_text = ('Ran %s on %s. Return code (%s).\nSTDOUT: %s\nSTDERR: %s' %
@@ -124,6 +235,51 @@ class WindowsMixin(virtual_machine.BaseOsMixin):
       raise errors.VirtualMachine.RemoteCommandError(error_text)
 
     return stdout, stderr
+
+  def InstallCygwin(self, bit64=True, packages=None):
+    """Downloads and installs cygwin on the Windows instance.
+
+    TODO(deitz): Support installing packages via vm.Install calls where the VM
+    would look in Linux packages and try to find a CygwinInstall function to
+    call. Alternatively, consider using cyg-apt as an installation method. With
+    this additional change, we could use similar code to run benchmarks under
+    both Windows and Linux (if necessary and useful).
+
+    Args:
+      bit64: Whether to use 64-bit Cygwin (default) or 32-bit Cygwin.
+      packages: List of packages to install on Cygwin.
+    """
+    url = _CYGWIN64_URL if bit64 else _CYGWIN32_URL
+    setup_exe = url.split('/')[-1]
+    self.DownloadFile(url, setup_exe)
+    self.RemoteCommand(
+        r'.\{setup_exe} --quiet-mode --site {mirror} --root "{cygwin_root}" '
+        '--packages {packages}'.format(
+            setup_exe=setup_exe,
+            mirror=_CYGWIN_MIRROR,
+            cygwin_root=_CYGWIN_ROOT,
+            packages=','.join(packages)))
+
+  def RemoteCommandCygwin(self, command, *args, **kwargs):
+    """Runs a Cygwin command on the VM.
+
+    Args:
+      command: A valid bash command to run under Cygwin.
+      *args: Arguments passed directly to RemoteCommandWithReturnCode.
+      **kwargs: Keyword arguments passed directly to
+          RemoteCommandWithReturnCode.
+
+    Returns:
+      A tuple of stdout and stderr from running the command.
+
+    Raises:
+      RemoteCommandError: If there was a problem issuing the command or the
+          command timed out.
+    """
+    # Wrap the command to be executed via bash.exe under Cygwin. Escape quotes
+    # since they are executed in a string.
+    cygwin_command = _CYGWIN_FORMAT.format(command=command.replace('"', r'\"'))
+    return self.RemoteCommand(cygwin_command, *args, **kwargs)
 
   def RemoteCopy(self, local_path, remote_path='', copy_to=True):
     """Copies a file to or from the VM.
@@ -256,7 +412,13 @@ class WindowsMixin(virtual_machine.BaseOsMixin):
     if FLAGS.log_windows_password:
       logging.info('Password for %s: %s', self, self.password)
 
+  @vm_util.Retry(poll_interval=1, max_retries=15)
   def OnStartup(self):
+    # Log driver information so that the user has a record of which drivers
+    # were used.
+    # TODO(user): put the driver information in the metadata.
+    stdout, _ = self.RemoteCommand('dism /online /get-drivers')
+    logging.info(stdout)
     stdout, _ = self.RemoteCommand('echo $env:TEMP')
     self.temp_dir = ntpath.join(stdout.strip(), 'pkb')
     stdout, _ = self.RemoteCommand('echo $env:USERPROFILE')
@@ -270,10 +432,11 @@ class WindowsMixin(virtual_machine.BaseOsMixin):
     """OS-specific implementation of reboot command."""
     self.RemoteCommand('shutdown -t 0 -r -f', ignore_failure=True)
 
+  @vm_util.Retry(log_errors=False, poll_interval=1)
   def VMLastBootTime(self):
-    """Returns the UTC time the VM was last rebooted as reported by the VM."""
-    resp, _ = self.RemoteHostCommand('systeminfo | find /i "Boot Time"',
-                                     suppress_warning=True)
+    """Returns the time the VM was last rebooted as reported by the VM."""
+    resp, _ = self.RemoteCommand(
+        'systeminfo | find /i "Boot Time"', suppress_warning=True)
     return resp
 
   def _AfterReboot(self):
@@ -308,6 +471,38 @@ class WindowsMixin(virtual_machine.BaseOsMixin):
       self.Uninstall(package_name)
     self.RemoteCommand('rm -recurse -force %s' % self.temp_dir)
     self.EnableGuestFirewall()
+
+  def WaitForProcessRunning(self, process, timeout):
+    """Blocks until either the timeout passes or the process is running.
+
+    Args:
+      process: string name of the process.
+      timeout: number of seconds to block while the process is not running.
+
+    Raises:
+      WaitTimeoutError: raised if the process does not run within "timeout"
+                        seconds.
+    """
+    command = ('$count={timeout};'
+               'while( (ps | select-string {process} | measure-object).Count '
+               '-eq 0 -and $count -gt 0) {{sleep 1; $count=$count-1}}; '
+               'if ($count -eq 0) {{echo "FAIL"}}').format(
+                   timeout=timeout, process=process)
+    stdout, _ = self.RemoteCommand(command)
+    if 'FAIL' in stdout:
+      raise WaitTimeoutError()
+
+  def IsProcessRunning(self, process):
+    """Checks if a given process is running on the system.
+
+    Args:
+      process: string name of the process.
+
+    Returns:
+      Whether the process name is in the PS output.
+    """
+    stdout, _ = self.RemoteCommand('ps')
+    return process in stdout
 
   def _GetNumCpus(self):
     """Returns the number of logical CPUs on the VM.
@@ -352,7 +547,7 @@ class WindowsMixin(virtual_machine.BaseOsMixin):
     # Allow more security protocols to make it easier to download from
     # sites where we don't know the security protocol beforehand
     command = ('[Net.ServicePointManager]::SecurityProtocol = '
-               '[System.Security.Authentication.SslProtocols] '
+               '[System.Net.SecurityProtocolType] '
                '"tls, tls11, tls12";'
                'Invoke-WebRequest {url} -OutFile {dest}').format(
                    url=url, dest=dest)
@@ -451,3 +646,41 @@ class WindowsMixin(virtual_machine.BaseOsMixin):
       devices: list of strings. A list of block devices.
     """
     raise NotImplementedError()
+
+  def SetProcessPriorityToHighByFlag(self, executable_name):
+    """Sets the CPU priority for a given executable name.
+
+    Note this only sets the CPU priority if FLAGS.set_cpu_priority_high is set.
+
+    Args:
+      executable_name: string. The executable name.
+    """
+    if not FLAGS.set_cpu_priority_high:
+      return
+
+    command = (
+        "New-Item 'HKLM:\\SOFTWARE\\Microsoft\\Windows "
+        "NT\\CurrentVersion\\Image File Execution Options\\{exe}\\PerfOptions' "
+        '-Force | New-ItemProperty -Name CpuPriorityClass -Value 3 -Force'
+    ).format(exe=executable_name)
+    self.RemoteCommand(command)
+    executables = self.os_metadata.get('high_cpu_priority')
+    if executables:
+      executables.append(executable_name)
+    else:
+      self.os_metadata['high_cpu_priority'] = [executable_name]
+
+
+class Windows2012Mixin(WindowsMixin):
+  """Class holding Windows2012 specific VM methods and attributes."""
+  OS_TYPE = os_types.WINDOWS2012
+
+
+class Windows2016Mixin(WindowsMixin):
+  """Class holding Windows2016 specific VM methods and attributes."""
+  OS_TYPE = os_types.WINDOWS2016
+
+
+class Windows2019Mixin(WindowsMixin):
+  """Class holding Windows2019 specific VM methods and attributes."""
+  OS_TYPE = os_types.WINDOWS2019

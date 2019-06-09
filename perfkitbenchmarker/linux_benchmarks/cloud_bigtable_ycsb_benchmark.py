@@ -34,16 +34,15 @@ from perfkitbenchmarker import configs
 from perfkitbenchmarker import data
 from perfkitbenchmarker import flags
 from perfkitbenchmarker import vm_util
-from perfkitbenchmarker.linux_benchmarks import hbase_ycsb_benchmark \
-    as hbase_ycsb
+from perfkitbenchmarker.linux_benchmarks import hbase_ycsb_benchmark as hbase_ycsb
 from perfkitbenchmarker.linux_packages import hbase
 from perfkitbenchmarker.linux_packages import ycsb
 from perfkitbenchmarker.providers.gcp import gcp_bigtable
 
 FLAGS = flags.FLAGS
 
-HBASE_CLIENT_VERSION = '1.1'
-BIGTABLE_CLIENT_VERSION = '0.9.0'
+HBASE_CLIENT_VERSION = '1.x'
+BIGTABLE_CLIENT_VERSION = '1.4.0'
 
 flags.DEFINE_string('google_bigtable_endpoint', 'bigtable.googleapis.com',
                     'Google API endpoint for Cloud Bigtable.')
@@ -51,15 +50,14 @@ flags.DEFINE_string('google_bigtable_admin_endpoint',
                     'bigtableadmin.googleapis.com',
                     'Google API endpoint for Cloud Bigtable table '
                     'administration.')
-flags.DEFINE_string('google_bigtable_zone_name', 'us-central1-b',
-                    'Bigtable zone.')
 flags.DEFINE_string('google_bigtable_instance_name', None,
-                    'Bigtable instance name.')
+                    'Bigtable instance name. If not specified, new instance '
+                    'will be created and deleted on the fly.')
 flags.DEFINE_string(
     'google_bigtable_hbase_jar_url',
     'https://oss.sonatype.org/service/local/repositories/releases/content/'
-    'com/google/cloud/bigtable/bigtable-hbase-{0}/'
-    '{1}/bigtable-hbase-{0}-{1}.jar'.format(
+    'com/google/cloud/bigtable/bigtable-hbase-{0}-hadoop/'
+    '{1}/bigtable-hbase-{0}-hadoop-{1}.jar'.format(
         HBASE_CLIENT_VERSION,
         BIGTABLE_CLIENT_VERSION),
     'URL for the Bigtable-HBase client JAR.')
@@ -79,11 +77,16 @@ cloud_bigtable_ycsb:
       https://www.googleapis.com/auth/bigtable.admin
       https://www.googleapis.com/auth/bigtable.data"""
 
+# Starting from version 1.4.0, there is no need to install a separate boring ssl
+# via TCNATIVE_BORINGSSL_URL.
 TCNATIVE_BORINGSSL_URL = (
     'http://search.maven.org/remotecontent?filepath='
     'io/netty/netty-tcnative-boringssl-static/'
     '1.1.33.Fork13/'
     'netty-tcnative-boringssl-static-1.1.33.Fork13-linux-x86_64.jar')
+DROPWIZARD_METRICS_CORE_URL = (
+    'http://search.maven.org/remotecontent?filepath='
+    'io/dropwizard/metrics/metrics-core/3.1.2/metrics-core-3.1.2.jar')
 HBASE_SITE = 'cloudbigtable/hbase-site.xml.j2'
 HBASE_CONF_FILES = [HBASE_SITE]
 HBASE_BINDING = 'hbase10-binding'
@@ -97,9 +100,6 @@ REQUIRED_SCOPES = (
 # TODO(connormccoy): Make table parameters configurable.
 COLUMN_FAMILY = 'cf'
 
-# Only used when we need to create the cluster.
-CLUSTER_SIZE = 3
-
 
 def GetConfig(user_config):
   return configs.LoadConfig(BENCHMARK_CONFIG, user_config, BENCHMARK_NAME)
@@ -108,9 +108,13 @@ def GetConfig(user_config):
 def CheckPrerequisites(benchmark_config):
   """Verifies that the required resources are present.
 
+  Args:
+    benchmark_config: Unused.
+
   Raises:
     perfkitbenchmarker.data.ResourceNotFound: On missing resource.
   """
+  del benchmark_config
   for resource in HBASE_CONF_FILES:
     data.ResourcePath(resource)
 
@@ -142,6 +146,7 @@ def _GetInstanceDescription(project, instance_name):
 
   Raises:
     KeyError: when the instance was not found.
+    IOError: when the list bigtable command fails.
   """
   env = {'CLOUDSDK_CORE_DISABLE_PROMPTS': '1'}
   env.update(os.environ)
@@ -191,7 +196,12 @@ def _Install(vm):
   instance_name = (FLAGS.google_bigtable_instance_name or
                    'pkb-bigtable-{0}'.format(FLAGS.run_uri))
   hbase_lib = posixpath.join(hbase.HBASE_DIR, 'lib')
-  for url in [FLAGS.google_bigtable_hbase_jar_url, TCNATIVE_BORINGSSL_URL]:
+
+  urls = [FLAGS.google_bigtable_hbase_jar_url, TCNATIVE_BORINGSSL_URL]
+  if 'hbase-1.x' in FLAGS.google_bigtable_hbase_jar_url:
+    urls.append(DROPWIZARD_METRICS_CORE_URL)
+
+  for url in urls:
     jar_name = os.path.basename(url)
     jar_path = posixpath.join(YCSB_HBASE_LIB, jar_name)
     vm.RemoteCommand('curl -Lo {0} {1}'.format(jar_path, url))
@@ -236,9 +246,9 @@ def Prepare(benchmark_spec):
     instance_name = 'pkb-bigtable-{0}'.format(FLAGS.run_uri)
     project = FLAGS.project or _GetDefaultProject()
     logging.info('Creating bigtable instance %s', instance_name)
-    zone = FLAGS.google_bigtable_zone_name
+    zone = FLAGS.google_bigtable_zone
     benchmark_spec.bigtable_instance = gcp_bigtable.GcpBigtableInstance(
-        instance_name, CLUSTER_SIZE, project, zone)
+        instance_name, project, zone)
     benchmark_spec.bigtable_instance.Create()
     instance = _GetInstanceDescription(project, instance_name)
     logging.info('Instance %s created successfully', instance)
@@ -280,8 +290,12 @@ def Run(benchmark_spec):
   instance_info = _GetInstanceDescription(
       FLAGS.project or _GetDefaultProject(), instance_name)
 
-  metadata = {'ycsb_client_vms': len(vms),
-              'bigtable_nodes': instance_info.get('serveNodes')}
+  metadata = {
+      'ycsb_client_vms': len(vms),
+      'bigtable_zone': instance_info.get('location').split('/')[-1],
+      'bigtable_storage_type': instance_info.get('defaultStorageType'),
+      'bigtable_node_count': instance_info.get('serveNodes')
+  }
 
   # By default YCSB uses a BufferedMutator for Puts / Deletes.
   # This leads to incorrect update latencies, since since the call returns

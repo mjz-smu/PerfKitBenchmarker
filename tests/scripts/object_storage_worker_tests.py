@@ -21,10 +21,11 @@ import unittest
 
 import mock
 
-import object_storage_api_tests
+from perfkitbenchmarker.scripts.object_storage_api_test_scripts import object_storage_api_tests
 
 
 class TestSizeDistributionIterator(unittest.TestCase):
+
   def testPointDistribution(self):
     dist = {10: 100.0}
 
@@ -56,6 +57,7 @@ class TestSizeDistributionIterator(unittest.TestCase):
 
 
 class TestMaxSizeInDistribution(unittest.TestCase):
+
   def testPointDistribution(self):
     dist = {10: 100.0}
     dist[10] = 100.0
@@ -70,6 +72,7 @@ class TestMaxSizeInDistribution(unittest.TestCase):
 
 
 class TestPrefixCounterIterator(unittest.TestCase):
+
   def testIterator(self):
     iterator = object_storage_api_tests.PrefixCounterIterator('foo')
     values = list(itertools.islice(iterator, 3))
@@ -77,6 +80,7 @@ class TestPrefixCounterIterator(unittest.TestCase):
 
 
 class TestPrefixTimestampSuffixIterator(unittest.TestCase):
+
   def testIterator(self):
     iterator = object_storage_api_tests.PrefixTimestampSuffixIterator(
         'foo', 'bar')
