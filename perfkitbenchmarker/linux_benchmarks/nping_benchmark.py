@@ -67,8 +67,7 @@ def Prepare(benchmark_spec):  # pylint: disable=unused-argument
   for vm in vms:
     vm.Install('nmap')
     vm.Install('iperf')
-    if vm_util.ShouldRunOnExternalIpAddress():
-      vm.AllowPort(NPING_PORT)
+    vm.AllowPort(NPING_PORT)
     stdout, _ = vm.RemoteCommand(('nohup iperf --server --port %s &> /dev/null'
                                   '& echo $!') % NPING_PORT)
 
