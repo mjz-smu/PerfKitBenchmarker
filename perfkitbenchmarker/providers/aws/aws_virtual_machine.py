@@ -451,6 +451,7 @@ class AwsVirtualMachine(virtual_machine.BaseVirtualMachine):
     self.metadata.update({
         'spot_instance': self.use_spot_instance,
         'spot_price': self.spot_price,
+        'aws_global_accelerator' : FLAGS.aws_global_accelerator
     })
     self.early_termination = False
     self.spot_status_code = None
