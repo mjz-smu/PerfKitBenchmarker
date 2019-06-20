@@ -7,7 +7,7 @@ iperf_vpn:
     vpn_service_gateway_count: 2 # gw_count needs to be in global flags so it's available to network setup
   vpn_service:
     tunnel_count: 1
-    gateway_count: 1
+    #gateway_count: 1
     ike_version: 2
     routing_type: static
   vm_groups:
