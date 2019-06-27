@@ -593,9 +593,9 @@ class AwsNetwork(network.BaseNetwork):
     name = 'vpnpkb-network-%s' % FLAGS.run_uri
     if spec.zone and spec.cidr and FLAGS.use_vpn:
       self.cidr = spec.cidr
-      for tunnelnum in range(0, FLAGS.vpn_service_tunnel_count):
+      for gwnum in range(0, FLAGS.vpn_service_gateway_count):
         vpngw_name = 'vpngw-%s-%s-%s' % (
-            spec.zone, tunnelnum, FLAGS.run_uri)
+            spec.zone, gwnum, FLAGS.run_uri)
         self.vpngw[vpngw_name] = AwsVPNGW(
             vpngw_name, name, spec.zone,
             spec.cidr)
@@ -888,7 +888,7 @@ class AwsVPNGW(network.BaseVPNGW):
     if self.vpn_connection and self.vpn_connection._Exists():
       self.vpn_connection.Delete()
 
-    if self.customer_gw and self.customer_gw.Exists():
+    if self.customer_gw and self.customer_gw._Exists():
       self.customer_gw.Delete()
 
 #     if self.forwarding_rules:
