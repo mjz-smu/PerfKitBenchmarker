@@ -355,6 +355,7 @@ class AzureGatewaySubnet(resource.BaseResource):
 
 
 class AzureVirtualNetworkGatewayResource(resource.BaseResource):
+    # @TODO implement methods isTunnelConfiured, ConfigureTunnel
 
   def __init__(self, name, location, ipaddress, vnet):
     super(AzureVirtualNetworkGatewayResource, self).__init__()
