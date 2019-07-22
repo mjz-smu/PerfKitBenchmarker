@@ -795,20 +795,20 @@ class AzureNetwork(network.BaseNetwork):
       logging.info("USE VPN")
       logging.info("num tunnels: " + str(FLAGS.vpn_service_tunnel_count))
 
-      tunnel_count = FLAGS.vpn_service_tunnel_count
+      gateway_count = FLAGS.vpn_service_gateway_count
 
-      if FLAGS.vpn_service_tunnel_count > 1:
-        logging.warning("--vpn_service_tunnel_count=" +
-                        str(FLAGS.vpn_service_tunnel_count) +
+      if FLAGS.vpn_service_gateway_count > 1:
+        logging.warning("--vpn_service_gateway_count=" +
+                        str(FLAGS.vpn_service_gateway_count) +
                         " Only 1 Virtual Network Gateway allowed per" +
                         " vnet in Azure. Flag value will be ignored for" +
                         " Azure vnets and only 1 gateway will be" +
                         " created in this vnet.")
-        tunnel_count = 1
+        gateway_count = 1
 
-      for tunnelnum in range(0, tunnel_count):
+      for gatewaynum in range(0, gateway_count):
         vpngw_name = 'vpngw-%s-%s-%s' % (
-            self.zone, tunnelnum, FLAGS.run_uri)
+            self.zone, gatewaynum, FLAGS.run_uri)
         ip_name = 'public-ip-gateway-%s-%s' % (self.zone, FLAGS.run_uri)
         self.gateway_ip = AzurePublicIPAddress(self.zone, ip_name)
         self.gateway_subnet = AzureGatewaySubnet(self.vnet)
